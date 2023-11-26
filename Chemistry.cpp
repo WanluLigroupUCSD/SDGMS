@@ -1,4 +1,7 @@
-#include "chemistry.h"
+#include "chemistry.hpp"
+
+
+
 atom::atom(double x, double y, double z) :x(x), y(y), z(z)
 {
     r = std::sqrt(x * x + y * y + z * z);
@@ -167,6 +170,41 @@ structure::structure(double x, double y, double z, std::vector<int> composition,
         }
     }
     if (sort)this->radiusSort();
+}
+structure::structure(std::string input, std::vector<std::string> elements, std::vector<int> composition)
+{
+	int lastSpace = 0;
+	int space = 0;
+	int element = -1;
+	while (input[space] != ' ')
+	{
+		space++;
+	}
+	this->energy = std::stof(input.substr(lastSpace, space - lastSpace));
+	for (int e = 0; e < composition.size(); e++)
+	{
+		//for all types of elements
+		std::vector<atom> element;
+		for (int a = 0; a < composition[e]; a++)
+		{
+			//for each atom of type e
+			double cx, cy, cz;
+			lastSpace = space;
+			while (input[++space] != ' '){}
+			//passed the letter
+			lastSpace = space;
+			while (input[++space] != ' '){}
+			cx = std::stof(input.substr(space, space - lastSpace));
+			lastSpace = space;
+			while (input[++space] != ' '){}
+			cy = std::stof(input.substr(space, space - lastSpace));
+			lastSpace = space;
+			while (input[++space] != ' '){}
+			cz = std::stof(input.substr(space, space - lastSpace));
+			element.push_back(atom(cx,cy,cz));
+		}
+		this->set.push_back(element);
+	}
 }
 structure::structure(structure original, double variation, bool sort) :elements(original.elements)
 {
