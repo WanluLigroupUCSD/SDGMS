@@ -16,6 +16,9 @@
 class atom {
 public:
 	atom(double x, double y, double z);
+	atom();
+	atom(const atom& t);
+	atom operator=(const atom& t);
 	void polarCenter(double x, double y, double z);
 	bool operator<(atom b);
 	bool operator<=(atom b);
@@ -28,7 +31,7 @@ public:
 	double psi;
 	double r;
 	double* scores = nullptr;
-	int types = 1;
+	int types = 0;
 	~atom();
 };
 
@@ -56,6 +59,37 @@ public:
 	std::vector<std::string> elements;
 	double energy;
 	double x, y, z;//geometric center
+	bool scored = false;
+
+
+
+	//iterator
+	struct Iterator
+	{
+		using iterator_category = std::forward_iterator_tag;
+		using difference_type = std::ptrdiff_t;
+		using value_type = atom;
+		using pointer = atom*;
+		using reference = atom&;
+
+		Iterator(pointer ptr , int indexI, int indexJ,std::vector<std::vector<atom>>& set);
+
+		reference operator*() const;
+		pointer operator->();
+		Iterator& operator++();
+		Iterator operator++(int);
+		bool operator== (const Iterator& a);
+		bool operator!= (const Iterator& a);
+
+		
+		pointer m_ptr;
+		int indexI;
+		int indexJ;
+		std::vector<std::vector<atom>> set;
+	};
+
+	Iterator begin();
+	Iterator end();
 };
 
 const double boltzman = 8.6173303e-5;//electron volts/kelvin
@@ -63,6 +97,7 @@ const double electronVolt = 1.602e-19;//joule
 
 int covalentRadii(std::string element, int bond);
 int vanDerWaalsRadii(std::string element);
+double picometersToAngstrom(int picometers);
 bool radialCriteria(structure s, int percent);
 
 

@@ -1,15 +1,60 @@
 #include "chemistry.hpp"
 
 
-
+atom::atom()
+{
+//i guess we have to have a default constructor
+	x, y, z = 0;
+	r, psi, theta = 0;
+	types = 0;
+	scores = nullptr;
+}
 atom::atom(double x, double y, double z) :x(x), y(y), z(z)
 {
     r = std::sqrt(x * x + y * y + z * z);
     psi = std::acos((x / std::sqrt(x * x + y * y)));
     theta = z / r;
 }
+atom::atom(const atom& t):x(t.x),y(t.y),z(t.z),theta(t.theta),psi(t.psi),r(t.r),types(t.types)
+{
+	if (t.scores != nullptr)
+	{
+		this->scores = new double[t.types];
+		for (int i = 0; i < t.types; i++)
+		{
+			this->scores[i] = t.scores[i];
+		}
+	}
+	else {
+		this->scores = nullptr;
+	}
+	
+}
+atom atom::operator=(const atom& t)
+{
+	this->x = t.x;
+	this->y = t.y;
+	this->z = t.z;
+	this->theta = t.theta;
+	this->psi = t.psi;
+	this->r = t.r;
+	this->types = t.types;
+	if (t.scores != nullptr)
+	{
+		this->scores = new double[t.types];
+		for (int i = 0; i < t.types; i++)
+		{
+			this->scores[i] = t.scores[i];
+		}
+	}
+	else {
+		this->scores = nullptr;
+	}
+	return *this;
+}
 atom::~atom()
 {
+	//std::cout << "atom deleter called" << std::endl;
     delete[] scores;
 }
 
@@ -47,6 +92,9 @@ structure::structure(std::vector<std::vector<atom>> set, std::vector<std::string
     double totalY = 0.0;
     double totalZ = 0.0;
     int n = 0;
+	//Today I learned that these iterators create copies of everything and then delete them...
+	//so if you want to use these iterators you need copy constructors for the objects inside that will not just copy pointers but instead recreate the objects
+
     for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++)
     {
         for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
@@ -341,6 +389,64 @@ structure::structure(structure original, double variationX, double variationY, d
     }
     if (sort)this->radiusSort();
 }
+
+using iterator_category = std::forward_iterator_tag;
+using difference_type = std::ptrdiff_t;
+using value_type = atom;
+using pointer = atom*;
+using reference = atom&;
+
+structure::Iterator::Iterator(pointer ptr,int indexI, int indexJ,std::vector<std::vector<atom>>& set) : m_ptr(ptr),indexI(indexI),indexJ(indexJ),set(set) {}
+reference structure::Iterator::operator*() const { return *m_ptr; }
+pointer structure::Iterator::operator->() { return m_ptr; }
+structure::Iterator& structure::Iterator::operator++() { 
+	//std::cout << "iteration; indexI: " << indexI << " indexI.size(): " << set[indexI].size() << " , IndexJ : " << indexJ << std::endl;
+	if (indexJ + 1 >= set[indexI].size() && indexI + 1 >= set.size())
+	{
+		//end pointer
+		indexI = -1;
+		indexJ = -1;
+		m_ptr = nullptr;
+	}
+	else if (indexJ + 1 >= set[indexI].size())
+	{
+		indexI = indexI + 1;
+		indexJ = 0;
+		m_ptr = &set[indexI][indexJ];
+	}
+	else {
+		indexJ++;
+		m_ptr = &set[indexI][indexJ];
+	}
+	return *this; 
+}
+structure::Iterator structure::Iterator::operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
+bool structure::Iterator::operator== (const structure::Iterator& a) { //return a.m_ptr == m_ptr;
+	return (a.indexI == indexI && a.indexJ == indexJ);
+};
+bool structure::Iterator::operator!= (const structure::Iterator& a) { 
+	//std::cout << "!=: " << a.indexI << " " << a.indexJ << " vs " << indexI << " " << indexJ << " " << " pointsers: " << a.m_ptr << " " << m_ptr  << std::endl;
+	/*if (a.indexI == indexI && a.indexJ == indexJ)
+	{
+		std::cout << "a vs b: X:" << (a.m_ptr)->x << " vs " << (m_ptr)->x << ",Y: " << (a.m_ptr)->y << " vs " << (m_ptr)->y << ",z: " << (a.m_ptr)->z << " vs " << (m_ptr)->z << std::endl;
+	}
+	*/
+	//return a.m_ptr != m_ptr; 
+	return !(a.indexI == indexI && a.indexJ == indexJ);
+};
+
+
+//first and last values
+structure::Iterator structure::begin() { return structure::Iterator(&set[0][0],0,0,set); }
+structure::Iterator structure::end() {
+	//int a = set.size() - 1;
+	//int b = set[a].size() - 1;
+	return structure::Iterator(nullptr,-1,-1,set); 
+	//technically the end is not supposed to be the last atom, but in this case we will set it to that to avoid other issues
+}
+
+
+
 
 void structure::radiusSort()
 {
@@ -1157,6 +1263,11 @@ int vanDerWaalsRadii(std::string element)
 	return 0;
 }
 
+double picometersToAngstrom(int picometers)
+{
+	return (double)picometers * 0.01;
+}
+
 bool radialCriteria(structure s, int percent)
 {
 	/*there will be a radial critera based on covalentand van der waals radii.
@@ -1183,20 +1294,20 @@ bool radialCriteria(structure s, int percent)
 					else {
 						//do not perform on the same atom
 						double dist = euclideanDistance(s.set[i][a], s.set[j][b]);
-						if (dist < vanDerWaalsRadii(s.elements[i]))
+						if (dist < picometersToAngstrom(vanDerWaalsRadii(s.elements[i])))
 						{
 							bool accept = false;
-							double bl1 = covalentRadii(s.elements[i], 1);
+							double bl1 = picometersToAngstrom(covalentRadii(s.elements[i], 1));
 							double bl1r = bl1 * ((double)percent / (double)100);
 							if (dist > bl1 - bl1r && dist < bl1 + bl1r) accept = true;
 							else {
-								double bl2 = covalentRadii(s.elements[i], 2);
+								double bl2 = picometersToAngstrom(covalentRadii(s.elements[i], 2));
 								if (bl2 != 0)
 								{
 									double bl2r = bl2 * ((double)percent / (double)100);
 									if (dist > bl2 - bl2r && dist < bl2 + bl2r) accept = true;
 									else {
-										double bl3 = covalentRadii(s.elements[i], 3);
+										double bl3 = picometersToAngstrom(covalentRadii(s.elements[i], 3));
 										if (bl3 != 0)
 										{
 											double bl3r = bl3 * ((double)percent / (double)100);

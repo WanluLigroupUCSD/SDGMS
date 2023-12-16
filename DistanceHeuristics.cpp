@@ -240,6 +240,7 @@ void scoreAtoms(structure &A)
             }
         }
     }
+    A.scored = true;
 }
 double RID(structure& A, structure& B)
 {
@@ -248,8 +249,9 @@ double RID(structure& A, structure& B)
     */
     int types = A.set.size();
     //structure A
-    scoreAtoms(A);
-    scoreAtoms(B);
+    if(!A.scored) scoreAtoms(A);
+    if(!B.scored) scoreAtoms(B);
+    
     double totalA = 0;
     for (int t = 0; t < types; t++)
     {
@@ -319,7 +321,7 @@ double threshold(std::function<double(structure&, structure&)> heuristic, std::v
 
     for (int i = 0; i < trials; i++)
     {
-        if ((i+1) % 100 == 0) std::cout << i / 100 << "% of trials generated" << std::endl;
+        if ((i+1) % 1000 == 0) std::cout << i / 100 << "% of trials generated" << std::endl;
         structure A = structure(rangeX, rangeY, rangeZ, composition);
         structure S = structure(A, similar/100 * rangeX, similar/100 * rangeY, similar/100 * rangeZ);
         structure D = structure(A, similar/100 * rangeX, similar/100 * rangeY, similar/100 * rangeZ,rangeX,rangeY,rangeZ);

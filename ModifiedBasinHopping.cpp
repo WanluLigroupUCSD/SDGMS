@@ -12,35 +12,7 @@
 #include <fstream>
 #include <stdlib.h>
 
-
-double basinHoppingEnergy(structure s, int ittt, std::string task, double a, double b, double c)
-{
-	double energy = 0;
-	double sigma = 1;
-	double epsilon = 1;
-	for (std::vector<std::vector<atom>>::iterator it = s.set.begin(); it != s.set.end(); it++)
-	{
-		for (int i = 0; i < it->size() - 1; i++)
-		{
-			for (std::vector<std::vector<atom>>::iterator itt = s.set.begin(); itt != s.set.end(); itt++)
-			{
-				for (int j = i+1; j < itt->size(); j++)
-				{
-					if (&(*it)[i] != &(*itt)[j])
-					{
-						double r = euclideanDistance((*it)[i], (*itt)[j]);
-
-						std::cout << "r: " << r << std::endl;
-						double e = pow(sigma / r, 12) - pow(sigma / r, 6);
-						std::cout << "e: " << e << std::endl;
-						energy += e;
-					}
-				}
-			}
-		}
-	}
-	return 0.5*epsilon * energy;
-};
+const int DEBUG = 1;
 
 double temperature(int step,int averageSteps,double eVLimit)
 {
@@ -651,6 +623,105 @@ void writeToCP2K(structure s, std::string task, std::string filename, std::strin
 	file.close();
 }
 
+double basinHoppingEnergy(structure s, int ittt, std::string task, double a, double b, double c)
+{
+	if (DEBUG > 1)
+	{
+		//scannign structure
+		for (std::vector<std::vector<atom>>::iterator it = s.set.begin(); it != s.set.end(); it++)
+		{
+			std::cout << "element set" << std::endl;
+			for (int i = 0; i < it->size(); i++)
+			{
+				std::cout << "atom: " << (*it)[i].x << " " << (*it)[i].y << " " << (*it)[i].z << std::endl;
+			}
+		}
+		std::string fileName = task + "_" + std::to_string(ittt) + "_" + std::to_string(rand() / 10);
+		std::string inFileName = fileName + "_in.txt";
+		writeToCP2K(s, task, inFileName, "/home/jpburkhardt/GMS/data/BASIS_SET", "/home/jpburkhardt/GMS/data/GTH_POTENTIALS", a, b, c);
+
+	}
+
+	/*
+	New basin hopping energy iterator
+	*/
+	double energy = 0;
+	double sigma = 1;
+	double epsilon = 1;
+	if (DEBUG > 1) std::cout << "starting energy calculation" << std::endl;
+
+	//the iterators i made for structure only work with do while loops
+	structure::Iterator it = s.begin();
+	do {
+		if (DEBUG > 3) std::cout << "new jt loop about to begin" << std::endl;
+		structure::Iterator jt = s.begin();
+		do {
+			if (DEBUG > 3) std::cout << "comparing" << "pointer " << it.m_ptr << " to " << "pointer " << jt.m_ptr << std::endl;
+			if (it != jt)
+			{
+				//if (DEBUG) std::cout << "doing some math" << std::endl;
+
+				if (DEBUG > 2) std::cout << "atom " << it.m_ptr << ": " << it->x << " " << it->y << " " << it->z << " vs atom2 " << jt.m_ptr << ": " << jt->x << " " << jt->y << " " << jt->z << std::endl;
+				double r = euclideanDistance((*it), (*jt));
+				//if (DEBUG) std::cout << "is r 0: " << r << std::endl;
+				//std::cout << "r: " << r << std::endl;
+				double e = pow(sigma / r, 12) - pow(sigma / r, 6);
+				if (DEBUG > 1) std::cout << it.indexI << "," << it.indexJ << " vs. " << jt.indexI << "," << jt.indexJ << " e: " << e << std::endl;
+				energy += e;
+			}
+			else {
+				if (DEBUG > 1) std::cout << "did not calculate an atom against itself" << std::endl;
+			}
+			if (DEBUG > 3) std::cout << "about to iterate jt" << std::endl;
+			jt++;
+		} while (jt != s.end());
+
+		it++;
+	} while (it != s.end());
+
+
+
+	/*
+	for (std::vector<std::vector<atom>>::iterator it = s.set.begin(); it != s.set.end(); it++)
+	{
+		if (DEBUG) std::cout << "iterating outer set" << std::endl;
+		for (int i = 0; i < it->size(); i++)
+		{
+			if (DEBUG) std::cout << "inner loop 1: all inner sets" << std::endl;
+			for (std::vector<std::vector<atom>>::iterator itt = s.set.begin(); itt != s.set.end(); itt++)
+			{
+				if (DEBUG) std::cout << "inner loop 2: inner sets size: " << itt->size() << std::endl;
+				for (int j = 0; j < itt->size(); j++)
+				{
+					if (DEBUG) std::cout << "about to do math" << std::endl;
+					if (&(*it)[i] != &(*itt)[j])
+					{
+						if (DEBUG) std::cout << "doing some math" << std::endl;
+						if (DEBUG) std::cout << "it size:" << it->size() << " " << i << std::endl;
+						if (DEBUG) std::cout << "itt size:" << itt->size() << " " << j << std::endl;
+						double r = euclideanDistance((*it)[i], (*itt)[j]);
+						//if (DEBUG) std::cout << "is r 0: " << r << std::endl;
+						//std::cout << "r: " << r << std::endl;
+						double e = pow(sigma / r, 12) - pow(sigma / r, 6);
+						//std::cout << "e: " << e << std::endl;
+						energy += e;
+					}
+					else {
+						if (DEBUG) std::cout << "did not calculate duplicate" << std::endl;
+					}
+					if (DEBUG) std::cout << "math done" << std::endl;
+				}
+				if (DEBUG) std::cout << "here 2" << std::endl;
+			}
+			if (DEBUG) std::cout << "here 1" << std::endl;
+		}
+		if (DEBUG) std::cout << "outer loop complete" << std::endl;
+	}
+	*/
+	if (DEBUG > 1) std::cout << "returning" << std::endl;
+	return 0.5 * epsilon * energy;
+};
+
 double energyCP2K(structure s, int ittt, std::string task, double a, double b, double c)
 {
 	//these a b c are for cell shape
@@ -762,41 +833,122 @@ double energyCP2K(structure s, int ittt, std::string task, double a, double b, d
 	return value;
 }
 
-void startModifiedBasinHopping(double x, double y, double z, std::vector<int> composition, std::vector<std::string> elements,std::function<double(structure, int, std::string, double, double, double)> energy, std::function<structure*(structure)> optimize,std::function<bool(structure,int)> radialCriteria,std::function<bool(structure, std::vector<std::set<int>>)> coordinationNumber,int coordinationSteps, int time, int localMinimaTrapping,std::string outputFileName, std::string taskName,double a, double b, double c)
+structure* getAcceptedStructure(double x, double y, double z, std::vector<std::string> elements, std::vector<int> composition, std::vector<structure*>& structures, std::vector<structure*>& localMinima, int coordinationSteps, std::vector<std::set<int>>& coordinationNumbers, int radialCriteriaPercent, double RIDthreshold )
 {
-	structure *s = new structure(x, y, z, composition, elements);
+	structure* retValue = nullptr;
+	bool seedAccepted = false;
+	if (DEBUG) std::cout << "looking for a new seed " << std::endl;
+	while (!seedAccepted)
+	{
+		//cant delete s because it doesn't exist
+		//delete s;
+		retValue = new structure(x, y, z, composition, elements);
+		std::vector<structure*>::iterator it = structures.begin();
+
+		if (localMinima.size() >= coordinationSteps)
+		{
+			while (!coordinationNumber(*retValue, coordinationNumbers) || !radialCriteria(*retValue, radialCriteriaPercent))
+			{
+				if (DEBUG) std::cout << "did not pass criteria ";
+				if (DEBUG) {
+					if (coordinationNumber(*retValue, coordinationNumbers)) std::cout << " radial" << std::endl;
+					else std::cout << " coordination numbers" << std::endl;
+				}
+				delete retValue;
+				retValue = new structure(x, y, z, composition, elements);
+			}
+		}
+		else {
+			while (!radialCriteria(*retValue, radialCriteriaPercent))
+			{
+				if (DEBUG) std::cout << "did not pass criteria (radial) " << std::endl;
+				delete retValue;
+				retValue = new structure(x, y, z, composition, elements);
+			}
+		}
+
+		//check that the new structure does not violate radius criteria
+		if (DEBUG) std::cout << "checking for uniqueness " << std::endl;
+
+
+		bool unique = true;
+
+		while (it != structures.end() && unique)
+		{
+			double dist = RID(*retValue, *(*it));
+			if (dist < RIDthreshold)
+			{
+				unique = false;
+			}
+			it++;
+		}
+		seedAccepted = unique;
+		if (!seedAccepted)
+		{
+			delete retValue;
+			//delete s here because we know we arent accepting it and we cant delete it at the top of the loop
+		}
+		else {
+			if (DEBUG) std::cout << "structure accepted" << std::endl;
+		}
+
+		
+
+
+		
+	}
+	return retValue;
+}
+
+void startModifiedBasinHopping(double x, double y, double z, std::vector<int> composition, std::vector<std::string> elements,std::function<double(structure, int, std::string, double, double, double)> energy, std::function<structure*(structure&)> optimize,std::function<bool(structure,int)> radialCriteria,std::function<bool(structure, std::vector<std::set<int>>)> coordinationNumber,int coordinationSteps, int time, int localMinimaTrapping,int radialCriteriaPercent, std::string outputFileName, std::string taskName,double a, double b, double c)
+{
+	std::vector<structure*> structures = { };
+	std::vector<structure*> localMinima = {};
+	std::vector<std::set<int>> coordinationNumbers;
+	double RIDthreshold = threshold(RID,composition, x, y, z, 1, 0);
+	structure* s = getAcceptedStructure(x, y, z, elements, composition, structures,localMinima, coordinationSteps, coordinationNumbers, radialCriteriaPercent, RIDthreshold);
+	
+
+		//new structure(x, y, z, composition, elements);
 	int energyCall = 1;
 	double seedEnergy = energy(*s,energyCall++,taskName,a,b,c);
+	if(DEBUG) std::cout << "seed structure energy: " << seedEnergy << std::endl;
 	//check it passes radial criteria?
 	s->energy = seedEnergy;
 
-	std::vector<structure*> structures = {s};
-	std::vector<structure*> localMinima;
-	structure* lastLocalMinima;
-	double RIDthreshold = threshold(RID, s->composition, x, y, z, 1, 0);
+	structures.push_back(s);
+	structure* lastLocalMinima = nullptr;
+	
+	if (DEBUG) std::cout << "RID threshold: " << RIDthreshold << std::endl;
 
 	int step = 0;
 	int stepsSinceNew = 0;
 
-	std::vector<std::set<int>> coordinationNumbers;
+	
 
 	auto start = std::chrono::high_resolution_clock::now();
 	auto stop = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
 	double hours = (double)duration.count() / (double)60;
-	while (hours < double(time) - 0.5)
+	if (DEBUG) std::cout << "chours:  " << hours << " ; time limit: " << double(time) - 0.5 <<  std::endl;
+	//int maxint_ = 0;//remove later!
+	while (hours < double(time) - 0.5 /* && 50 > maxint_++*/)
 	{
+		if (DEBUG) std::cout << "step: " << step << " time: " << double(time) << std::endl;
 		step += 1;
 		structure* Xnew;
 
 		//to avoid local minima trapping, if for a while a new structure cant be accepted then move to a new one
 		if (stepsSinceNew > localMinimaTrapping)
 		{
+			if (DEBUG) std::cout << "steps since new passed "  << std::endl;
 			//should we restart the step size here for the purpose of deviation from seed?
 			step = 1;
 			//to avoid local minima trapping find a new (unique) seed
 			
 			bool seedAccepted = false;
+			if (DEBUG) std::cout << "looking for a new seed "  << std::endl;
+			/*
 			while (!seedAccepted)
 			{
 				//cant delete s because it might still be the last good structure
@@ -806,14 +958,14 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 
 				if (localMinima.size() >= coordinationSteps)
 				{
-					while (!coordinationNumber(*s,coordinationNumbers) || !radialCriteria(*s))
+					while (!coordinationNumber(*s,coordinationNumbers) || !radialCriteria(*s,radialCriteriaPercent))
 					{
 						delete s;
 						s = new structure(x, y, z, composition, elements);
 					}
 				}
 				else {
-					while (!radialCriteria(*s))
+					while (!radialCriteria(*s,radialCriteriaPercent))
 					{
 						delete s;
 						s = new structure(x, y, z, composition, elements);
@@ -837,37 +989,67 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 					//delete s here because we know we arent accepting it and we cant delete it at the top of the loop
 				}
 			}
+			*/
+			s = getAcceptedStructure(x, y, z, elements, composition, structures, localMinima, coordinationSteps, coordinationNumbers, radialCriteriaPercent, RIDthreshold);
 			// a new seed to start with in s that is unique and passes criteria
 			double seedEnergy = energy(*s,energyCall++, taskName, a, b, c);
+			if (DEBUG) std::cout << "new seed found: " << seedEnergy << std::endl;
 			structures.push_back(s);
 			stepsSinceNew = 0;
 		}
-		
-		structure* Xnew = new structure(*s, step);
+		//std::cout << "remove later, doing a completely random structure" << std::endl;
+		//energy(structure(*s, step), energyCall++, taskName, a, b, c);
+
+		if (DEBUG) std::cout << "creating a new structure " << std::endl;
+
+
+		Xnew = new structure(*s, step);
+		//std::cout << "calculating energy right now!" << std::endl;
+		energy(*Xnew, energyCall++, taskName, a, b, c);
+		std::cout << " basic call worked" << std::endl;
+		radialCriteria(*Xnew, radialCriteriaPercent);
+		energy(*Xnew, energyCall++, taskName, a, b, c);
+		std::cout << " radial criteria worked" << std::endl;
+		scoreAtoms(*Xnew);
+		energy(*Xnew, energyCall++, taskName, a, b, c);
+		std::cout << " the sub task worked" << std::endl;
+		RID(*Xnew, *(*structures.begin()));
+		energy(*Xnew, energyCall++, taskName, a, b, c);
+		std::cout << "rid worked" << std::endl;
+		//end of tests
+
+		//as the commented out energy calls  worked above, something after this point causes the energy check to fail.
 		
 		if (localMinima.size() == coordinationSteps)
 		{
+			if (DEBUG) std::cout << "generating coordination numbers " << std::endl;
 			coordinationNumbers = generateAcceptedCoordinationNumbers(localMinima);
 		}
 		if (localMinima.size() >= coordinationSteps)
 		{
-			while (!coordinationNumber(*Xnew,coordinationNumbers) || !radialCriteria(*Xnew))
+			while (!coordinationNumber(*Xnew,coordinationNumbers) || !radialCriteria(*Xnew,radialCriteriaPercent))
 			{
+				if (DEBUG) std::cout << "did not pass criteria ";
+				if (DEBUG) {
+					if (coordinationNumber(*Xnew, coordinationNumbers)) std::cout << " radial" << std::endl;
+					else std::cout << " coordination numbers" << std::endl;
+				}
 				delete Xnew;
-				structure* Xnew = new structure(*s, step);
+				Xnew = new structure(*s, step);
 			}
 		}
 		else {
-			while (!radialCriteria(*Xnew))
+			while (!radialCriteria(*Xnew,radialCriteriaPercent))
 			{
+				if (DEBUG) std::cout << "did not pass criteria (radial) " << std::endl;
 				delete Xnew;
-				structure* Xnew = new structure(*s, step);
+				Xnew = new structure(*s, step);
 			}
 		}
 
 
 		//check that the new structure does not violate radius criteria
-		
+		if (DEBUG) std::cout << "checking for uniqueness " << std::endl;
 
 		//check for uniqueness
 		std::vector<structure*>::iterator it = structures.begin();
@@ -882,8 +1064,10 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 			it++;
 		}
 
+
 		if (unique)
 		{
+			if (DEBUG) std::cout << "unique " << std::endl;
 			// add to structures
 			structures.push_back(Xnew);
 			/*
@@ -891,19 +1075,21 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 			TODO
 			*/
 			//optimize Xnew
-			Xnew = optimize(*Xnew);
+			//Xnew = optimize(*Xnew);
+			// this is causing a crash because there is no optimize
 			//should we add the optimized structure to structures? check if it already is in structures?
 			/*
 			TODO
 			*/
-
+			if (DEBUG) std::cout << "calling energy of Xnew " << std::endl;
 			double newEnergy = energy(*Xnew, energyCall++, taskName, a, b, c);
+			if (DEBUG) std::cout << "Xnew energy: " << newEnergy << std::endl;
 			Xnew->energy = newEnergy;
 			bool accept = false;
 
 			if (newEnergy < seedEnergy)
 			{
-				
+				if (DEBUG) std::cout << "accepted for lower, set new local minima " << std::endl;
 				accept = true;
 				stepsSinceNew = 0;
 				lastLocalMinima = Xnew;
@@ -920,8 +1106,18 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 				double pThreshold = std::exp((seedEnergy - newEnergy)/(boltzman*temperature(stepsSinceNew,100,1.5)));//e^(Es-Ex)/KbT
 				if (p < pThreshold)
 				{
+					if (DEBUG) std::cout << "accepted by statistics, pushed last local minima " << std::endl;
 					accept = true;
-					localMinima.push_back(lastLocalMinima);
+
+					//somehow its possible to get to this line of code when lastLocalMinima has not yet been set.
+					//this only occurs at the beginning, so maybe we should push back the seed in this case, however I am just going to not push anything in that case for now although likely it should be the seed.
+					if (lastLocalMinima != nullptr) {
+						std::cout << "pushing the last local minima" << lastLocalMinima->energy << std::endl;
+						localMinima.push_back(lastLocalMinima);
+						std::cout << " its energy is " << localMinima[localMinima.size() - 1]->energy << std::endl;
+					}
+
+						
 				}
 				
 			}
@@ -935,6 +1131,7 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 				step++;
 				//need some way to save all energies?, maybe a variable in structure
 			}else {
+				if (DEBUG) std::cout << "rejected " << std::endl;
 				stepsSinceNew++;
 			}
 
@@ -942,6 +1139,7 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 		}
 		else
 		{
+			if (DEBUG) std::cout << "not unique" << std::endl;
 			stepsSinceNew++;
 		}
 
@@ -949,7 +1147,7 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 		duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
 		hours = (double)duration.count() / (double)60;
 	}
-
+	if (DEBUG) std::cout << "prinitng results " << std::endl;
 	/*
 	print all structures
 	*/
@@ -995,7 +1193,26 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 	//structures with energies
 	outputString += "local minima only: energy,structure:\n";
 
-
+	//int iii = 0;
+	std::cout << "local minima size: " << localMinima.size() << std::endl;
+	for (std::vector<structure*>::iterator c_structure = localMinima.begin(); c_structure != localMinima.end(); c_structure++)
+	{
+		
+		//std::cout << "going through the localMinima " << iii++ << " e: " << (*c_structure)->energy << std::endl;//remove later
+		std::string line = "energy: " + std::to_string((*c_structure)->energy);
+		for (int e = 0; e < (*c_structure)->set.size(); e++)
+		{
+			for (int a = 0; a < (*c_structure)->set[e].size(); a++)
+			{
+				//each atom
+				line += " " + (*c_structure)->elements[e] + " " + std::to_string((*c_structure)->set[e][a].x) + " " + std::to_string((*c_structure)->set[e][a].y) + " " + std::to_string((*c_structure)->set[e][a].z);
+			}
+		}
+		line += "\n";
+		outputString += line;
+	}
+	/*
+	//the below code had a memory error which i dont understand
 	for (int i = 0; i < localMinima.size(); i++)
 	{
 		//for each structure
@@ -1011,9 +1228,27 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 		line += "\n";
 		outputString += line;
 	}
+	*/
 	outputString += "all structures: energy,structure:\n";
-
-
+	//iii = 0;
+	for (std::vector<structure*>::iterator c_structure = structures.begin(); c_structure != structures.end(); c_structure++)
+	{
+		//for each structure
+		//std::cout << "going through the all structures " << iii++ << " e: " << (*c_structure)->energy << std::endl;//remove later
+		std::string line = "energy: " + std::to_string((*c_structure)->energy);
+		for (int e = 0; e < (*c_structure)->set.size(); e++)
+		{
+			for (int a = 0; a < (*c_structure)->set[e].size(); a++)
+			{
+				//each atom
+				line += " " + (*c_structure)->elements[e] + " " + std::to_string((*c_structure)->set[e][a].x) + " " + std::to_string((*c_structure)->set[e][a].y) + " " + std::to_string((*c_structure)->set[e][a].z);
+			}
+		}
+		line += "\n";
+		outputString += line;
+	}
+	//this syntax should be removed just incase
+	/*
 	for (int i = 0; i < structures.size(); i++)
 	{
 		//for each structure
@@ -1029,8 +1264,10 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 		line += "\n";
 		outputString += line;
 	}
+	*/
 	int numStructures = structures.size();
 	//delete everything except output string
+	if (DEBUG) std::cout << "cleaning memory " << std::endl;
 	for (int i = 0; i < structures.size(); i++)
 	{
 		delete structures[i];
@@ -1050,49 +1287,84 @@ std::pair< std::vector<int>, std::vector<std::string>> getComposition(std::strin
 {
 	std::vector<int> composition;
 	std::vector<std::string> elements;
-	bool instring;
-	std::string current;
+	bool instring = true;//assume we start in a string
+	std::string current = "";
 	int currint = 0;
 	for (int i = 0; i < comp.size(); i++)
 	{
 		if (comp[i] > 48 && comp[i] < 57)
 		{
 			//numeric
-			if (instring) {
-				//switch
-				instring = false;
-				elements.push_back(current);
-				current = "";
+			if (i > 0) {
+				if (instring) {
+					if (DEBUG) std::cout << "added " << current << " to elements" << std::endl;
+					//switch
+					instring = false;
+					elements.push_back(current);
+					current = "";
+					
+				}
 			}
 			currint = currint * 10 + (comp[i] - 48);
 		}
 		if (comp[i] >= 65 && comp[i] <= 90)
 		{
 			//uppercase
-			if (!instring) {
-				//switch
-				instring = true;
-				composition.push_back(currint);
-				currint = 0;
+			if (i > 0) {
+				if (!instring) {
+					if (DEBUG) std::cout << "added " << currint << " to composition" << std::endl;
+					//switch
+					instring = true;
+					composition.push_back(currint);
+					currint = 0;
+					
+				}
+				else {
+					if (DEBUG) std::cout << "added " << current << " to elements and " << 1 << " to composition" << std::endl;
+					//elements begin with capitals so the last one is over
+					elements.push_back(current);
+					composition.push_back(1);//only one of the last element
+					current = "";
+					
+				}
 			}
 			current = current + comp[i];
 		}
 		if (comp[i] >= 97 && comp[i] <= 122)
 		{
 			//lowercase
-			if (!instring) {
-				//switch
-				instring = true;
-				composition.push_back(currint);
-				currint = 0;
+			if (i > 0) {
+				if (!instring) {
+					if (DEBUG) std::cout << "added " << currint << " to composition" << std::endl;
+					//switch
+					instring = true;
+					composition.push_back(currint);
+					currint = 0;
+					
+				}
 			}
 			current = current + comp[i];
 		}
 	}
+	//dont forget who was added last
+	if (!instring) {
+		if (DEBUG) std::cout << "added " << currint << " to composition" << std::endl;
+		composition.push_back(currint);
+		currint = 0;
+		
+	}
+	else {
+		if (DEBUG) std::cout << "added " << current << " to elements and " << 1 << " to composition" << std::endl;
+		//elements begin with capitals so the last one is over
+		elements.push_back(current);
+		composition.push_back(1);//omly one of the last element
+		current = "";
+		
+	}
 	return std::pair< std::vector<int>, std::vector<std::string>>(composition, elements);
 }
 
-void continueModifiedBasinHopping(std::string startFileName, std::function<double(structure, int, std::string, double, double, double)>  energy, std::function<structure* (structure)> optimize, std::function<bool(structure,int)> radialCriteria, std::function<bool(structure, std::vector<std::set<int>>)> coordinationNumber, int coordinationSteps, int time, int localMinimaTrapping, std::string outputFileName,std::string taskName, double a, double b, double c)
+void continueModifiedBasinHopping(std::string startFileName, std::function<double(structure, int, std::string, double, double, double)>  energy, std::function<structure* (structure&)> optimize, std::function<bool(structure,int)> radialCriteria, std::function<bool(structure, std::vector<std::set<int>>)> coordinationNumber, int coordinationSteps, int time, int localMinimaTrapping, int radialCriteriaPercent, std::string outputFileName,std::string taskName, double a, double b, double c)
 {
 	int energyCall = 1;
 	std::ifstream startFile(startFileName);
@@ -1209,6 +1481,7 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 			//to avoid local minima trapping find a new (unique) seed
 
 			bool seedAccepted = false;
+			/*
 			while (!seedAccepted)
 			{
 				//cant delete s because it might still be the last good structure
@@ -1218,14 +1491,14 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 
 				if (allLocalMinima.size() >= coordinationSteps)
 				{
-					while (!coordinationNumber(*s,coordinationNumbers) || !radialCriteria(*s))
+					while (!coordinationNumber(*s,coordinationNumbers) || !radialCriteria(*s,radialCriteriaPercent))
 					{
 						delete s;
 						s = new structure(x, y, z, composition, elements);
 					}
 				}
 				else {
-					while (!radialCriteria(*s))
+					while (!radialCriteria(*s,radialCriteriaPercent))
 					{
 						delete s;
 						s = new structure(x, y, z, composition, elements);
@@ -1249,13 +1522,16 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 					//delete s here because we know we arent accepting it and we cant delete it at the top of the loop
 				}
 			}
+			*/
+			s = getAcceptedStructure(x, y, z, elements, composition, structures, allLocalMinima, coordinationSteps, coordinationNumbers, radialCriteriaPercent, RIDthreshold);
+
 			// a new seed to start with in s that is unique and passes criteria
 			double seedEnergy = energy(*s, energyCall++, taskName, a, b, c);
 			structures.push_back(s);
 			stepsSinceNew = 0;
 		}
 
-		structure* Xnew = new structure(*s, step);
+		Xnew = new structure(*s, step);
 
 		if (allLocalMinima.size() == coordinationSteps)
 		{
@@ -1263,17 +1539,17 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 		}
 		if (allLocalMinima.size() >= coordinationSteps)
 		{
-			while (!coordinationNumber(*Xnew,coordinationNumbers) || !radialCriteria(*Xnew))
+			while (!coordinationNumber(*Xnew,coordinationNumbers) || !radialCriteria(*Xnew,radialCriteriaPercent))
 			{
 				delete Xnew;
-				structure* Xnew = new structure(*s, step);
+				Xnew = new structure(*s, step);
 			}
 		}
 		else {
-			while (!radialCriteria(*Xnew))
+			while (!radialCriteria(*Xnew,radialCriteriaPercent))
 			{
 				delete Xnew;
-				structure* Xnew = new structure(*s, step);
+				Xnew = new structure(*s, step);
 			}
 		}
 
@@ -1303,7 +1579,7 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 			TODO
 			*/
 			//optimize Xnew
-			Xnew = optimize(*Xnew);
+			//Xnew = optimize(*Xnew);
 			//should we add the optimized structure to structures? check if it already is in structures?
 			/*
 			TODO
@@ -1384,16 +1660,16 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 	outputString += std::to_string(RIDthreshold) + "\n";
 	//add the last accepted structure
 	outputString += "last energy,structure:\n";
-	std::string line = std::to_string(s->energy);
+	std::string oline = std::to_string(s->energy);
 	for (int e = 0; e < s->set.size(); e++)
 	{
 		for (int a = 0; a < s->set[e].size(); a++)
 		{
 			//each atom
-			line += " " + s->elements[e] + " " + std::to_string(s->set[e][a].x) + " " + std::to_string(s->set[e][a].y) + " " + std::to_string(s->set[e][a].z);
+			oline += " " + s->elements[e] + " " + std::to_string(s->set[e][a].x) + " " + std::to_string(s->set[e][a].y) + " " + std::to_string(s->set[e][a].z);
 		}
 	}
-	line += "\n";
+	oline += "\n";
 	outputString += line;
 	//add the most recent steps since new
 	outputString += "steps since new:\n";
@@ -1405,16 +1681,16 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 	for (int i = 0; i < structures.size(); i++)
 	{
 		//for each structure
-		std::string line = "energy: " + std::to_string(structures[i]->energy);
+		std::string ooline = "energy: " + std::to_string(structures[i]->energy);
 		for (int e = 0; e < structures[i]->set.size(); e++)
 		{
 			for (int a = 0; a < structures[i]->set[e].size(); a++)
 			{
 				//each atom
-				line += " " + structures[i]->elements[e] + " " + std::to_string(structures[i]->set[e][a].x) + " " + std::to_string(structures[i]->set[e][a].y) + " " + std::to_string(structures[i]->set[e][a].z);
+				ooline += " " + structures[i]->elements[e] + " " + std::to_string(structures[i]->set[e][a].x) + " " + std::to_string(structures[i]->set[e][a].y) + " " + std::to_string(structures[i]->set[e][a].z);
 			}
 		}
-		line += "\n";
+		ooline += "\n";
 		outputString += line;
 	}
 	int numStructures = structures.size() + totalStructures;
@@ -1435,11 +1711,12 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 
 }
 
-structure* optimize(structure s)
+structure* optimize(structure& s)
 {
 	/*
 	Todo
 	*/
+	//thsi causes a crash dont use!
 	return nullptr;
 }
 
@@ -1447,6 +1724,43 @@ structure* optimize(structure s)
 
 int main(int argv, char *argc[])
 {
+	/*
+	std::vector<int> compositionC = { 1,4 };
+	std::vector<std::string> elementsE = { "C","H" };
+	//structure sss(8, 8, 8, compositionC, elementsE);
+	//structure ss2(8, 8, 8, compositionC, elementsE);
+	//RID(sss, ss2);
+	//structure ss3(8, 8, 8, compositionC, elementsE);
+	//RID(ss3, ss2);
+	//std::cout << "starting tests" << std::endl;
+	//scoreAtoms(sss);
+	//basinHoppingEnergy(sss, 1000, "no", 20, 20, 20);
+	//std::cout << "starting tests pass?" << std::endl;
+	//return 0;
+
+	startModifiedBasinHopping(5, 5, 5, compositionC, elementsE, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, 100000, 1, 100, 30, "noOnecares", "testingOut", 20, 20, 20);
+
+	return 0;
+	structure Ss(8, 8, 8, compositionC, elementsE);
+	double RIDthreshold = threshold(RID, compositionC, 5, 5, 5, 1, 0);
+	std::vector<structure*> structures = { };
+	std::vector<structure*> localMinima = {};
+	std::vector<std::set<int>> coordinationNumbers;
+	structure* s = getAcceptedStructure(5, 5, 5, elementsE, compositionC, structures, localMinima,20000, coordinationNumbers, 20, RIDthreshold);
+
+	std::cout << basinHoppingEnergy(*s, 1000, "no_task", 20, 20, 20);
+	structure* Xnew;
+	Xnew = new structure(*s, 1);
+	structures.push_back(Xnew);
+	if (DEBUG) std::cout << "calling energy of Xnew " << std::endl;
+	
+	double newEnergy = basinHoppingEnergy(*Xnew, 1001, "no task", 20, 20,20);
+	if (DEBUG) std::cout << "Xnew energy: " << newEnergy << std::endl;
+	Xnew->energy = newEnergy;
+	delete Xnew;
+	delete s;
+	return 0;
+	*/
 	/*
 	necessary arguments:
 	old or new project
@@ -1484,6 +1798,7 @@ int main(int argv, char *argc[])
 	std::vector<std::string> elements;
 	std::string taskName;
 	std::string outputFileName;
+	int radialCriteriaPercent;
 
 	int cycles;
 	int time;
@@ -1504,9 +1819,10 @@ int main(int argv, char *argc[])
 	bool mflag = false;
 	bool tflag = false;
 	bool sflag = false;
-
-	for (int i = 1; i <= argv; i++)
+	//ModifiedBasinHopping.exe -c CH4 -xyz 5 5 5 -abc 20 20 20 -t 1 -s 100 -l 30 -n isItWorking testOutOne -r 50
+	for (int i = 1; i < argv; i++)
 	{
+		std::cout << "current argument: " << argc[i]  << " next argument: " << argc[i+1] << std::endl;
 		if (i + 1 > argv)
 		{
 			std::cout << "flag out of bounds" << std::endl;
@@ -1515,70 +1831,103 @@ int main(int argv, char *argc[])
 			std::cout << "missing argument for: " << argc[i] << std::endl;
 		}
 		else {
-			if (argc[i] == "-f") {
-				previousFilename = argc[i + 1];
-				continuePastRun = true;
-				i++;
-			}
-			else if (argc[i] == "-b")
+		if ((std::string)argc[i] == "-f") {
+			previousFilename = argc[i + 1];
+			if (DEBUG) std::cout << "previous filename: " << previousFilename << std::endl;
+			continuePastRun = true;
+			i++;
+		}
+		else if ((std::string)argc[i] == "-b")
+		{
+			basis = argc[i + 1];
+			if (DEBUG) std::cout << "basis: " << basis << std::endl;
+			i++;
+		}
+		else if ((std::string)argc[i] == "-p")
+		{
+			potential = argc[i + 1];
+			if (DEBUG) std::cout << "potential: " << potential << std::endl;
+			i++;
+		}
+		else if (std::string(argc[i]) == "-c")
+		{
+			compositionString = std::string( argc[i + 1]);
+			if (DEBUG) std::cout << "composition string: " << compositionString << std::endl;
+			std::pair< std::vector<int>, std::vector<std::string>> comppair = getComposition(compositionString);
+			composition = comppair.first;
+			elements = comppair.second;
+			for (std::vector<int>::iterator it = composition.begin(); it != composition.end(); it++)
 			{
-				basis = argc[i + 1];
-				i++;
+				if (DEBUG) std::cout << *it << " ";
 			}
-			else if (argc[i] == "-p")
+			for (std::vector<std::string>::iterator it = elements.begin(); it != elements.end(); it++)
 			{
-				potential = argc[i + 1];
-				i++;
+				if (DEBUG) std::cout << *it << " ";
 			}
-			else if (argc[i] == "-c")
-			{
-				compositionString = argc[i + 1];
-				i++;
-			}
-			else if (argc[i] == "-xyz")
-			{
-				double x = std::atof(argc[i + 1]);
-				double y = std::atof(argc[i + 2]);
-				double z = std::atof(argc[i + 3]);
-				i+=3;
-			}
-			else if (argc[i] == "-abc")
-			{
-				double a = std::atof(argc[i + 1]);
-				double b = std::atof(argc[i + 2]);
-				double c = std::atof(argc[i + 3]);
-				i += 3;
-			}
-			else if (argc[i] == "-m")
-			{
-				cycles = std::atoi(argc[i + 1]);
-				i++;
-			}
-			else if (argc[i] == "-t")
-			{
-				time = std::atoi(argc[i + 1]);
-				i++;
-			}
-			else if (argc[i] == "-s")
-			{
-				coordinationSteps = std::atoi(argc[i + 1]);
-				i++;
-			}
-			else if (argc[i] == "-l")
-			{
-				localMinimaTrappingSteps = std::atoi(argc[i + 1]);
-				i++;
-			}
-			else if (argc[i] == "-n")
-			{
-				taskName = argc[i + 1];
-				i++;
-			}
-			else if (argc[i] == "-o")
-			{
-				outputFileName = argc[i + 1];
-				i++;
-			}
+			if (DEBUG) std::cout << std::endl;
+			i++;
+		}
+		else if ((std::string)argc[i] == "-xyz")
+		{
+			x = std::atof(argc[i + 1]);
+			y = std::atof(argc[i + 2]);
+			z = std::atof(argc[i + 3]);
+			if (DEBUG) std::cout << "xyz: " << x << " " << y << " " << z << std::endl;
+			i += 3;
+		}
+		else if ((std::string)argc[i] == "-abc")
+		{
+			a = std::atof(argc[i + 1]);
+			b = std::atof(argc[i + 2]);
+			c = std::atof(argc[i + 3]);
+			if (DEBUG) std::cout << "abc: " << a << " " << b << " " << c << std::endl;
+			i += 3;
+		}
+		else if ((std::string)argc[i] == "-m")
+		{
+			cycles = std::atoi(argc[i + 1]);
+			if (DEBUG) std::cout << "cycles?: " << cycles << std::endl;
+			i++;
+		}
+		else if ((std::string)argc[i] == "-t")
+		{
+			time = std::atoi(argc[i + 1]);
+			if (DEBUG) std::cout << "time allowed: " << time << std::endl;
+			i++;
+		}
+		else if ((std::string)argc[i] == "-s")
+		{
+			coordinationSteps = std::atoi(argc[i + 1]);
+			if (DEBUG) std::cout << "coordination steps: " << coordinationSteps << std::endl;
+			i++;
+		}
+		else if ((std::string)argc[i] == "-l")
+		{
+			localMinimaTrappingSteps = std::atoi(argc[i + 1]);
+			if (DEBUG) std::cout << "local minima trapping steps: " << localMinimaTrappingSteps << std::endl;
+			i++;
+		}
+		else if ((std::string)argc[i] == "-n")
+		{
+			taskName = argc[i + 1];
+			if (DEBUG) std::cout << "task name: " << taskName << std::endl;
+			i++;
+		}
+		else if ((std::string)argc[i] == "-o")
+		{
+			outputFileName = argc[i + 1];
+			if (DEBUG) std::cout << "output filename: " << outputFileName << std::endl;
+			i++;
+		}
+		else if ((std::string)argc[i] == "-r")
+		{
+			radialCriteriaPercent = std::stoi(argc[i + 1]);
+			if (DEBUG) std::cout << "radial criteria percent: " << radialCriteriaPercent << std::endl;
+			i++;
+		}
+		else {
+			std::cout << argc[i] << " not identified as a flag" << std::endl;
+		}
 		}
 
 
@@ -1586,13 +1935,15 @@ int main(int argv, char *argc[])
 		
 	}
 
+	if (DEBUG) std::cout << "opening if else " << std::endl;
 	if (continuePastRun)
 	{
-		
-		continueModifiedBasinHopping(previousFilename, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, coordinationSteps, time, localMinimaTrappingSteps, outputFileName, taskName, a, b, c);
+		if (DEBUG) std::cout << "continuing modified basin hopping: " << std::endl;
+		continueModifiedBasinHopping(previousFilename, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, coordinationSteps, time, localMinimaTrappingSteps, radialCriteriaPercent,outputFileName, taskName, a, b, c);
 	}
 	else {
-		startModifiedBasinHopping(x, y, z, composition, elements, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, coordinationSteps, time, localMinimaTrappingSteps, outputFileName, taskName, a, b, c);
+		if (DEBUG) std::cout << "start modified basin hopping: " << std::endl;
+		startModifiedBasinHopping(x, y, z, composition, elements, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, coordinationSteps, time, localMinimaTrappingSteps, radialCriteriaPercent,outputFileName, taskName, a, b, c);
 	}
 
 
