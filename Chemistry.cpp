@@ -180,9 +180,9 @@ structure::structure(double x, double y, double z, std::vector<int> composition,
         for (int i = 0; i < *it; i++)
         {
 
-            double newX = x * (rand() % RAND_MAX) / RAND_MAX;
-            double newY = y * (rand() % RAND_MAX) / RAND_MAX;
-            double newZ = z * (rand() % RAND_MAX) / RAND_MAX;
+            double newX = x * (2*(rand() % RAND_MAX) / RAND_MAX - 1);
+            double newY = y * (2*(rand() % RAND_MAX) / RAND_MAX - 1);
+            double newZ = z * (2*(rand() % RAND_MAX) / RAND_MAX - 1);
             atoms.push_back(atom(newX, newY, newZ));
             //std::cout << "new atom at " << newX << "," << newY << "," << newZ << std::endl;
         }
@@ -219,15 +219,20 @@ structure::structure(double x, double y, double z, std::vector<int> composition,
     }
     if (sort)this->radiusSort();
 }
-structure::structure(std::string input, std::vector<std::string> elements, std::vector<int> composition)
+structure::structure(std::string input, std::vector<std::string> elements, std::vector<int> composition):elements(elements)
 {
 	int lastSpace = 0;
 	int space = 0;
 	int element = -1;
-	while (input[space] != ' ')
+	std::cout << " debugging: " << input << std::endl;
+	if (input[space] == 'e')
 	{
-		space++;
+		//it says energy: first, ignore
+		while (input[++space] != ' ') std::cout << "debugging? " << input[space] << std::endl;
 	}
+	lastSpace = space;
+	std::cout << "input:" << input[space] << std::endl;
+	while (input[++space] != ' ');
 	this->energy = std::stof(input.substr(lastSpace, space - lastSpace));
 	for (int e = 0; e < composition.size(); e++)
 	{
@@ -242,28 +247,46 @@ structure::structure(std::string input, std::vector<std::string> elements, std::
 			//passed the letter
 			lastSpace = space;
 			while (input[++space] != ' '){}
-			cx = std::stof(input.substr(space, space - lastSpace));
+			cx = std::stof(input.substr(lastSpace, space - lastSpace));
 			lastSpace = space;
 			while (input[++space] != ' '){}
-			cy = std::stof(input.substr(space, space - lastSpace));
+			cy = std::stof(input.substr(lastSpace, space - lastSpace));
 			lastSpace = space;
-			while (input[++space] != ' '){}
-			cz = std::stof(input.substr(space, space - lastSpace));
+			std::cout << "cy: " << cy << std::endl;
+			while (input[++space] != ' ' && input[space] != '\0') {}
+			std::cout << "another problem?" << std::endl;
+			cz = std::stof(input.substr(lastSpace, space - lastSpace));
 			element.push_back(atom(cx,cy,cz));
+			std::cout << "cz: " << cz << std::endl;
 		}
 		this->set.push_back(element);
 	}
 }
-structure::structure(structure original, double variation, bool sort) :elements(original.elements)
+structure::structure(structure& original, double variationX, double variationY, double variationZ, double cellX, double cellY, double cellZ, bool sort) :elements(original.elements)
 {
+
+
     for (std::vector<std::vector<atom>>::iterator it = original.set.begin(); it != original.set.end(); it++)
     {
         std::vector<atom> atoms;
         for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
         {
-            double varX = 2 * variation * rand() / RAND_MAX - 1;
-            double varY = 2 * variation * rand() / RAND_MAX - 1;
-            double varZ = 2 * variation * rand() / RAND_MAX - 1;
+            double varX = variationX * (2* rand() / RAND_MAX - 1);
+			while((itt->x + varX) < -cellX || itt->x + varX > cellX)
+			{
+				varX = variationX * (2 * rand() / RAND_MAX - 1);
+			}
+            double varY = variationY * (2* rand() / RAND_MAX - 1);
+			while ((itt->y + varY) < -cellY || itt->y + varY > cellY)
+			{
+				varY = variationY * (2 * rand() / RAND_MAX - 1);
+			}
+            double varZ = variationZ * (2* rand() / RAND_MAX - 1);
+			while ((itt->z + varZ) < -cellZ || itt->z + varZ > cellZ)
+			{
+				varZ = variationZ * (2 * rand() / RAND_MAX - 1);
+			}
+
             atom at = atom(itt->x + varX, itt->y + varY, itt->z + varZ);
             //std::cout << "new atom at " << at.x << "," << at.y << "," << at.z << std::endl;
             atoms.push_back(at);
@@ -299,7 +322,7 @@ structure::structure(structure original, double variation, bool sort) :elements(
     }
     if (sort)this->radiusSort();
 }
-structure::structure(structure original, double variationX, double variationY, double variationZ, bool sort) :elements(original.elements)
+structure::structure(structure& original, double variationX, double variationY, double variationZ, bool sort) :elements(original.elements)
 {
     //makes variants of at most variation x,y,z
     for (std::vector<std::vector<atom>>::iterator it = original.set.begin(); it != original.set.end(); it++)
@@ -344,7 +367,7 @@ structure::structure(structure original, double variationX, double variationY, d
     }
     if (sort)this->radiusSort();
 }
-structure::structure(structure original, double variationX, double variationY, double variationZ, double rangeX, double rangeY, double rangeZ, bool sort) :elements(original.elements)
+/*structure::structure(structure& original, double variationX, double variationY, double variationZ, double rangeX, double rangeY, double rangeZ, bool sort) :elements(original.elements)
 {
     //makes variants of structure original where the minimum variation is varX,y& z and maximum is range
     for (std::vector<std::vector<atom>>::iterator it = original.set.begin(); it != original.set.end(); it++)
@@ -388,7 +411,7 @@ structure::structure(structure original, double variationX, double variationY, d
         }
     }
     if (sort)this->radiusSort();
-}
+}*/
 
 using iterator_category = std::forward_iterator_tag;
 using difference_type = std::ptrdiff_t;
@@ -1268,7 +1291,7 @@ double picometersToAngstrom(int picometers)
 	return (double)picometers * 0.01;
 }
 
-bool radialCriteria(structure s, int percent)
+bool radialCriteria(structure& s, int percent)
 {
 	/*there will be a radial critera based on covalentand van der waals radii.
 	//single, double and triple bonding must be allowed

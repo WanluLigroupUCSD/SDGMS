@@ -58,7 +58,7 @@ std::vector<std::set<int>> generateAcceptedCoordinationNumbers(std::vector<struc
 
 }
 
-bool coordinationNumber(structure s, std::vector<std::set<int>> coordinationNumbers)
+bool coordinationNumber(structure& s, std::vector<std::set<int>> coordinationNumbers)
 {
 	for (int i = 0; i < s.coordinationNumbers.size(); i++)
 	{
@@ -503,7 +503,7 @@ std::string getBasisSet(std::string element, int complexity)
 	return "GTH-PADE-q" + std::to_string(getBasisSetElectrons(element, complexity));
 }
 
-void writeToCP2K(structure s, std::string task, std::string filename, std::string basis_file, std::string potential_file, double a = 0, double b = 0, double c = 0)
+void writeToCP2K(structure& s, std::string task, std::string filename, std::string basis_file, std::string potential_file, double a = 0, double b = 0, double c = 0)
 {
 	std::string output;
 	std::ofstream file(filename);
@@ -623,7 +623,7 @@ void writeToCP2K(structure s, std::string task, std::string filename, std::strin
 	file.close();
 }
 
-double basinHoppingEnergy(structure s, int ittt, std::string task, double a, double b, double c)
+double basinHoppingEnergy(structure& s, int ittt, std::string task, double a, double b, double c)
 {
 	if (DEBUG > 1)
 	{
@@ -722,7 +722,7 @@ double basinHoppingEnergy(structure s, int ittt, std::string task, double a, dou
 	return 0.5 * epsilon * energy;
 };
 
-double energyCP2K(structure s, int ittt, std::string task, double a, double b, double c)
+double energyCP2K(structure& s, int ittt, std::string task, double a, double b, double c)
 {
 	//these a b c are for cell shape
 	std::string fileName = task + "_" + std::to_string(ittt) + "_" + std::to_string(rand() / 10);
@@ -900,7 +900,7 @@ structure* getAcceptedStructure(double x, double y, double z, std::vector<std::s
 	return retValue;
 }
 
-void startModifiedBasinHopping(double x, double y, double z, std::vector<int> composition, std::vector<std::string> elements,std::function<double(structure, int, std::string, double, double, double)> energy, std::function<structure*(structure&)> optimize,std::function<bool(structure,int)> radialCriteria,std::function<bool(structure, std::vector<std::set<int>>)> coordinationNumber,int coordinationSteps, int time, int localMinimaTrapping,int radialCriteriaPercent, std::string outputFileName, std::string taskName,double a, double b, double c)
+void startModifiedBasinHopping(double x, double y, double z,double percentChangeI, double percentChangeF, std::vector<int> composition, std::vector<std::string> elements,std::function<double(structure&, int, std::string, double, double, double)> energy, std::function<structure*(structure&)> optimize,std::function<bool(structure&,int)> radialCriteria,std::function<bool(structure&, std::vector<std::set<int>>)> coordinationNumber,int coordinationSteps, int time, int localMinimaTrapping,int radialCriteriaPercent, std::string outputFileName, std::string taskName,double a, double b, double c)
 {
 	std::vector<structure*> structures = { };
 	std::vector<structure*> localMinima = {};
@@ -932,11 +932,11 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 	double hours = (double)duration.count() / (double)60;
 	if (DEBUG) std::cout << "chours:  " << hours << " ; time limit: " << double(time) - 0.5 <<  std::endl;
 	//int maxint_ = 0;//remove later!
-	while (hours < double(time) - 0.5 /* && 50 > maxint_++*/)
+	while (hours < double(time) - 0.5/* && 50 > maxint_++*/)
 	{
 		if (DEBUG) std::cout << "step: " << step << " time: " << double(time) << std::endl;
 		step += 1;
-		structure* Xnew;
+		structure* Xnew = nullptr;
 
 		//to avoid local minima trapping, if for a while a new structure cant be accepted then move to a new one
 		if (stepsSinceNew > localMinimaTrapping)
@@ -1000,10 +1000,18 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 		//std::cout << "remove later, doing a completely random structure" << std::endl;
 		//energy(structure(*s, step), energyCall++, taskName, a, b, c);
 
+		
+
 		if (DEBUG) std::cout << "creating a new structure " << std::endl;
 
-
-		Xnew = new structure(*s, step);
+		//determine variation based on step
+		double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
+		double variationX = x* sigmoidPercentageFromStep /100;
+		double variationY = y * sigmoidPercentageFromStep / 100;
+		double variationZ = z * sigmoidPercentageFromStep / 100;
+		Xnew = new structure(*s, variationX, variationY, variationZ, a,b,c);
+		//tests
+		/*
 		//std::cout << "calculating energy right now!" << std::endl;
 		energy(*Xnew, energyCall++, taskName, a, b, c);
 		std::cout << " basic call worked" << std::endl;
@@ -1016,6 +1024,7 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 		RID(*Xnew, *(*structures.begin()));
 		energy(*Xnew, energyCall++, taskName, a, b, c);
 		std::cout << "rid worked" << std::endl;
+		*/
 		//end of tests
 
 		//as the commented out energy calls  worked above, something after this point causes the energy check to fail.
@@ -1035,7 +1044,11 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 					else std::cout << " coordination numbers" << std::endl;
 				}
 				delete Xnew;
-				Xnew = new structure(*s, step);
+				double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
+				double variationX = x * sigmoidPercentageFromStep / 100;
+				double variationY = y * sigmoidPercentageFromStep / 100;
+				double variationZ = z * sigmoidPercentageFromStep / 100;
+				Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
 			}
 		}
 		else {
@@ -1043,7 +1056,11 @@ void startModifiedBasinHopping(double x, double y, double z, std::vector<int> co
 			{
 				if (DEBUG) std::cout << "did not pass criteria (radial) " << std::endl;
 				delete Xnew;
-				Xnew = new structure(*s, step);
+				double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
+				double variationX = x * sigmoidPercentageFromStep / 100;
+				double variationY = y * sigmoidPercentageFromStep / 100;
+				double variationZ = z * sigmoidPercentageFromStep / 100;
+				Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
 			}
 		}
 
@@ -1364,7 +1381,7 @@ std::pair< std::vector<int>, std::vector<std::string>> getComposition(std::strin
 	return std::pair< std::vector<int>, std::vector<std::string>>(composition, elements);
 }
 
-void continueModifiedBasinHopping(std::string startFileName, std::function<double(structure, int, std::string, double, double, double)>  energy, std::function<structure* (structure&)> optimize, std::function<bool(structure,int)> radialCriteria, std::function<bool(structure, std::vector<std::set<int>>)> coordinationNumber, int coordinationSteps, int time, int localMinimaTrapping, int radialCriteriaPercent, std::string outputFileName,std::string taskName, double a, double b, double c)
+void continueModifiedBasinHopping(std::string startFileName, std::function<double(structure&, int, std::string, double, double, double)>  energy, std::function<structure* (structure&)> optimize, std::function<bool(structure&,int)> radialCriteria, std::function<bool(structure&, std::vector<std::set<int>>)> coordinationNumber, double percentChangeI, double percentChangeF, int coordinationSteps, int time, int localMinimaTrapping, int radialCriteriaPercent, std::string outputFileName,std::string taskName, double a, double b, double c)
 {
 	int energyCall = 1;
 	std::ifstream startFile(startFileName);
@@ -1383,6 +1400,7 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 	std::getline(startFile, line);// "Composition:\n";
 	std::getline(startFile, line);
 	std::pair< std::vector<int>, std::vector<std::string>> comp = getComposition(line);
+	int debugo = 0;
 	composition = comp.first;
 	elements = comp.second;
 	
@@ -1402,12 +1420,10 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 	x = std::stof(line.substr(xstart, ystart-xstart));
 	y = std::stof(line.substr(ystart, zstart - ystart));
 	z = std::stof(line.substr(zstart, zstart-line.size()));
-	
 
 	std::getline(startFile, line); //"threshold:\n";
 	std::getline(startFile, line);
 	RIDthreshold = std::stoi(line);
-
 
 	std::getline(startFile, line);// "last energy,structure:\n";
 	std::getline(startFile, line);
@@ -1422,19 +1438,23 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 	/*
 	Todo set steps since new
 	*/
-
+	std::getline(startFile, line);// "coordination numbers:\n"; ?? what should i do with this?? - we recalculate later?
 	std::getline(startFile, line);// "local minima energy,structure:\n";
 	std::vector<structure*> previousLocalMinima;
-	std::vector<structure*> allLocalMinima;
-	structure* lastLocalMinima;
-	while (std::getline(startFile, line))
+	std::vector<structure*> allLocalMinima = {};
+	structure* lastLocalMinima = nullptr;
+	std::getline(startFile, line);
+	while (line[0] != 'a')
 	{
 		structure* next = new structure(line, elements, composition);
 		previousLocalMinima.push_back(next);
 		allLocalMinima.push_back(next);
 		lastLocalMinima = next;//constantly reset until we get the actual last one
+		
+		//load the next line. the reason this isn't done in the conditional is because we need to stop at a text line
+		std::getline(startFile, line);
 	}
-	std::getline(startFile, line);// "all structures energy,structure:\n";
+	//std::getline(startFile, line);// "all structures energy,structure:\n";// this should already be ignored
 
 	int totalStructures = 0;
 	while (std::getline(startFile, line))
@@ -1442,16 +1462,15 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 		totalStructures++;
 	}
 	
-	
 
 	// Close the file
 	startFile.close();
 
 
 
-
 	
 	double seedEnergy = s->energy;
+	structures.push_back(s);
 	//check it passes radial criteria?
 
 
@@ -1461,26 +1480,31 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 	//double RIDthreshold = threshold(RID, s->composition, x, y, z, 1, 0);
 
 	int step = 0;
-	
+	//int stepsSinceNew = 0;
 	std::vector<std::set<int>> coordinationNumbers = generateAcceptedCoordinationNumbers(previousLocalMinima);
 
 	auto start = std::chrono::high_resolution_clock::now();
 	auto stop = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
 	double hours = (double)duration.count() / (double)60;
-	while (hours < double(time) - 0.5)
+
+	//int maxint_ = 0;//remove later!
+	while (hours < double(time) - 0.5/* && 50 > maxint_++*/)
 	{
+		if (DEBUG) std::cout << "step: " << step << " time: " << double(time) << std::endl;
 		step += 1;
-		structure* Xnew;
+		structure* Xnew = nullptr;
 
 		//to avoid local minima trapping, if for a while a new structure cant be accepted then move to a new one
 		if (stepsSinceNew > localMinimaTrapping)
 		{
-
-			step = 1;//reset so that the movements are base size
+			if (DEBUG) std::cout << "steps since new passed "  << std::endl;
+			//should we restart the step size here for the purpose of deviation from seed?
+			step = 1;
 			//to avoid local minima trapping find a new (unique) seed
-
+			
 			bool seedAccepted = false;
+			if (DEBUG) std::cout << "looking for a new seed "  << std::endl;
 			/*
 			while (!seedAccepted)
 			{
@@ -1489,7 +1513,7 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 				s = new structure(x, y, z, composition, elements);
 				std::vector<structure*>::iterator it = structures.begin();
 
-				if (allLocalMinima.size() >= coordinationSteps)
+				if (localMinima.size() >= coordinationSteps)
 				{
 					while (!coordinationNumber(*s,coordinationNumbers) || !radialCriteria(*s,radialCriteriaPercent))
 					{
@@ -1524,38 +1548,83 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 			}
 			*/
 			s = getAcceptedStructure(x, y, z, elements, composition, structures, allLocalMinima, coordinationSteps, coordinationNumbers, radialCriteriaPercent, RIDthreshold);
-
 			// a new seed to start with in s that is unique and passes criteria
-			double seedEnergy = energy(*s, energyCall++, taskName, a, b, c);
+			double seedEnergy = energy(*s,energyCall++, taskName, a, b, c);
+			if (DEBUG) std::cout << "new seed found: " << seedEnergy << std::endl;
 			structures.push_back(s);
 			stepsSinceNew = 0;
 		}
+		//std::cout << "remove later, doing a completely random structure" << std::endl;
+		//energy(structure(*s, step), energyCall++, taskName, a, b, c);
 
-		Xnew = new structure(*s, step);
+		if (DEBUG) std::cout << "creating a new structure " << std::endl;
 
+		
+		double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
+		double variationX = x * sigmoidPercentageFromStep / 100;
+		double variationY = y * sigmoidPercentageFromStep / 100;
+		double variationZ = z * sigmoidPercentageFromStep / 100;
+		Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
+		//tests
+		//
+		/*
+		//std::cout << "calculating energy right now!" << std::endl;
+		energy(*Xnew, energyCall++, taskName, a, b, c);
+		std::cout << " basic call worked" << std::endl;
+		radialCriteria(*Xnew, radialCriteriaPercent);
+		std::cout << "testing" << std::endl;
+		energy(*Xnew, energyCall++, taskName, a, b, c);
+		std::cout << " radial criteria worked" << std::endl;
+		scoreAtoms(*Xnew);
+		energy(*Xnew, energyCall++, taskName, a, b, c);
+		std::cout << " the sub task worked" << std::endl;
+		RID(*Xnew, *(*structures.begin()));
+		std::cout << " the sub task worked" << std::endl;
+		energy(*Xnew, energyCall++, taskName, a, b, c);
+		std::cout << "rid worked" << std::endl;
+		*/
+		//end of tests
+
+		//as the commented out energy calls  worked above, something after this point causes the energy check to fail.
+		
 		if (allLocalMinima.size() == coordinationSteps)
 		{
+			if (DEBUG) std::cout << "generating coordination numbers " << std::endl;
 			coordinationNumbers = generateAcceptedCoordinationNumbers(allLocalMinima);
 		}
 		if (allLocalMinima.size() >= coordinationSteps)
 		{
 			while (!coordinationNumber(*Xnew,coordinationNumbers) || !radialCriteria(*Xnew,radialCriteriaPercent))
 			{
+				if (DEBUG) std::cout << "did not pass criteria ";
+				if (DEBUG) {
+					if (coordinationNumber(*Xnew, coordinationNumbers)) std::cout << " radial" << std::endl;
+					else std::cout << " coordination numbers" << std::endl;
+				}
 				delete Xnew;
-				Xnew = new structure(*s, step);
+				double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
+				double variationX = x * sigmoidPercentageFromStep / 100;
+				double variationY = y * sigmoidPercentageFromStep / 100;
+				double variationZ = z * sigmoidPercentageFromStep / 100;
+				Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
 			}
 		}
 		else {
 			while (!radialCriteria(*Xnew,radialCriteriaPercent))
 			{
+				if (DEBUG) std::cout << "did not pass criteria (radial) " << std::endl;
 				delete Xnew;
-				Xnew = new structure(*s, step);
+				double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
+				double variationX = x * sigmoidPercentageFromStep / 100;
+				double variationY = y * sigmoidPercentageFromStep / 100;
+				double variationZ = z * sigmoidPercentageFromStep / 100;
+				Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
 			}
 		}
 
 
 		//check that the new structure does not violate radius criteria
-
+		if (DEBUG) std::cout << "checking for uniqueness " << std::endl;
 
 		//check for uniqueness
 		std::vector<structure*>::iterator it = structures.begin();
@@ -1563,15 +1632,17 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 		while (it != structures.end() && unique)
 		{
 			double dist = RID(*Xnew, *(*it));
-			if (dist < RIDthreshold)
+			if(dist < RIDthreshold)
 			{
 				unique = false;
 			}
 			it++;
 		}
 
+
 		if (unique)
 		{
+			if (DEBUG) std::cout << "unique " << std::endl;
 			// add to structures
 			structures.push_back(Xnew);
 			/*
@@ -1580,24 +1651,28 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 			*/
 			//optimize Xnew
 			//Xnew = optimize(*Xnew);
+			// this is causing a crash because there is no optimize
 			//should we add the optimized structure to structures? check if it already is in structures?
 			/*
 			TODO
 			*/
-
+			if (DEBUG) std::cout << "calling energy of Xnew " << std::endl;
 			double newEnergy = energy(*Xnew, energyCall++, taskName, a, b, c);
+			if (DEBUG) std::cout << "Xnew energy: " << newEnergy << std::endl;
 			Xnew->energy = newEnergy;
 			bool accept = false;
 
 			if (newEnergy < seedEnergy)
 			{
-
+				if (DEBUG) std::cout << "last energy: " << seedEnergy << " new energy: " << newEnergy << std::endl;
+				if (DEBUG) std::cout << "accepted for lower, set new local minima " << std::endl;
 				accept = true;
 				stepsSinceNew = 0;
 				lastLocalMinima = Xnew;
 			}
 			else
 			{
+				if (DEBUG) std::cout << "last energy: " << seedEnergy << " new energy: " << newEnergy << std::endl;
 				/*
 				current seed is a local minima. add to local minima?
 				*/
@@ -1605,13 +1680,26 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 
 				double p = rand() / RAND_MAX;
 
-				double pThreshold = std::exp((seedEnergy - newEnergy) / (boltzman * temperature(stepsSinceNew, 100, 1.5)));//e^(Es-Ex)/KbT
+				double pThreshold = std::exp((seedEnergy - newEnergy)/(boltzman*temperature(stepsSinceNew,100,1.5)));//e^(Es-Ex)/KbT
 				if (p < pThreshold)
 				{
+					if (DEBUG) std::cout << "accepted by statistics, pushed last local minima " << std::endl;
 					accept = true;
-					allLocalMinima.push_back(lastLocalMinima);
-				}
 
+					//somehow its possible to get to this line of code when lastLocalMinima has not yet been set.
+					//this only occurs at the beginning, so maybe we should push back the seed in this case, however I am just going to not push anything in that case for now although likely it should be the seed.
+					if (lastLocalMinima != nullptr) {
+						std::cout << "pushing the last local minima" << lastLocalMinima->energy << std::endl;
+						allLocalMinima.push_back(lastLocalMinima);
+						std::cout << " its energy is " << allLocalMinima[allLocalMinima.size() - 1]->energy << std::endl;
+					}
+
+						
+				}
+				else {
+					if (DEBUG) std::cout << "rejected by statistics" << std::endl;
+				}
+				
 			}
 			if (accept)
 			{
@@ -1622,8 +1710,8 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 				seedEnergy = newEnergy;
 				step++;
 				//need some way to save all energies?, maybe a variable in structure
-			}
-			else {
+			}else {
+				if (DEBUG) std::cout << "rejected " << std::endl;
 				stepsSinceNew++;
 			}
 
@@ -1631,6 +1719,7 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 		}
 		else
 		{
+			if (DEBUG) std::cout << "not unique" << std::endl;
 			stepsSinceNew++;
 		}
 
@@ -1638,7 +1727,7 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 		duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
 		hours = (double)duration.count() / (double)60;
 	}
-
+	if (DEBUG) std::cout << "prinitng results " << std::endl;
 	/*
 	print all structures
 	*/
@@ -1657,57 +1746,135 @@ void continueModifiedBasinHopping(std::string startFileName, std::function<doubl
 
 	//rid threshold
 	outputString += "threshold:\n";
-	outputString += std::to_string(RIDthreshold) + "\n";
+	outputString += std::to_string(RIDthreshold)  + "\n";
 	//add the last accepted structure
 	outputString += "last energy,structure:\n";
-	std::string oline = std::to_string(s->energy);
+	std::string line2 = std::to_string(s->energy);
 	for (int e = 0; e < s->set.size(); e++)
 	{
 		for (int a = 0; a < s->set[e].size(); a++)
 		{
 			//each atom
-			oline += " " + s->elements[e] + " " + std::to_string(s->set[e][a].x) + " " + std::to_string(s->set[e][a].y) + " " + std::to_string(s->set[e][a].z);
+			line2 += " " + s->elements[e] + " " + std::to_string(s->set[e][a].x) + " " + std::to_string(s->set[e][a].y) + " " + std::to_string(s->set[e][a].z);
 		}
 	}
-	oline += "\n";
-	outputString += line;
+	line2 += "\n";
+	outputString += line2;
 	//add the most recent steps since new
 	outputString += "steps since new:\n";
 	outputString += std::to_string(stepsSinceNew) + "\n";
+	//coordination numbers
+	outputString += "coordination numbers:\n";
+	if (coordinationSteps <= allLocalMinima.size())
+	{
+		coordinationNumbers = generateAcceptedCoordinationNumbers(allLocalMinima);
+	}
+
 	//structures with energies
-	outputString += "energy,structure:\n";
+	outputString += "local minima only: energy,structure:\n";
 
-
+	//int iii = 0;
+	std::cout << "local minima size: " << allLocalMinima.size() << std::endl;
+	for (std::vector<structure*>::iterator c_structure = allLocalMinima.begin(); c_structure != allLocalMinima.end(); c_structure++)
+	{
+		
+		//std::cout << "going through the localMinima " << iii++ << " e: " << (*c_structure)->energy << std::endl;//remove later
+		std::string line3 = "energy: " + std::to_string((*c_structure)->energy);
+		for (int e = 0; e < (*c_structure)->set.size(); e++)
+		{
+			for (int a = 0; a < (*c_structure)->set[e].size(); a++)
+			{
+				//each atom
+				line3 += " " + (*c_structure)->elements[e] + " " + std::to_string((*c_structure)->set[e][a].x) + " " + std::to_string((*c_structure)->set[e][a].y) + " " + std::to_string((*c_structure)->set[e][a].z);
+			}
+		}
+		line3 += "\n";
+		outputString += line3;
+	}
+	/*
+	//the below code had a memory error which i dont understand
+	for (int i = 0; i < localMinima.size(); i++)
+	{
+		//for each structure
+		std::string line = "energy: " + std::to_string(localMinima[i]->energy);
+		for (int e = 0; e < localMinima[i]->set.size(); e++)
+		{
+			for (int a = 0; a < localMinima[i]->set[e].size(); a++)
+			{
+				//each atom
+				line += " " + localMinima[i]->elements[e] + " " + std::to_string(localMinima[i]->set[e][a].x) + " " + std::to_string(localMinima[i]->set[e][a].y) + " " + std::to_string(localMinima[i]->set[e][a].z);
+			}
+		}
+		line += "\n";
+		outputString += line;
+	}
+	*/
+	outputString += "all structures: energy,structure:\n";
+	//iii = 0;
+	for (std::vector<structure*>::iterator c_structure = structures.begin(); c_structure != structures.end(); c_structure++)
+	{
+		//for each structure
+		//std::cout << "going through the all structures " << iii++ << " e: " << (*c_structure)->energy << std::endl;//remove later
+		std::string line3 = "energy: " + std::to_string((*c_structure)->energy);
+		for (int e = 0; e < (*c_structure)->set.size(); e++)
+		{
+			for (int a = 0; a < (*c_structure)->set[e].size(); a++)
+			{
+				//each atom
+				line3 += " " + (*c_structure)->elements[e] + " " + std::to_string((*c_structure)->set[e][a].x) + " " + std::to_string((*c_structure)->set[e][a].y) + " " + std::to_string((*c_structure)->set[e][a].z);
+			}
+		}
+		line3 += "\n";
+		outputString += line3;
+	}
+	//this syntax should be removed just incase
+	/*
 	for (int i = 0; i < structures.size(); i++)
 	{
 		//for each structure
-		std::string ooline = "energy: " + std::to_string(structures[i]->energy);
+		std::string line = "energy: " + std::to_string(structures[i]->energy);
 		for (int e = 0; e < structures[i]->set.size(); e++)
 		{
 			for (int a = 0; a < structures[i]->set[e].size(); a++)
 			{
 				//each atom
-				ooline += " " + structures[i]->elements[e] + " " + std::to_string(structures[i]->set[e][a].x) + " " + std::to_string(structures[i]->set[e][a].y) + " " + std::to_string(structures[i]->set[e][a].z);
+				line += " " + structures[i]->elements[e] + " " + std::to_string(structures[i]->set[e][a].x) + " " + std::to_string(structures[i]->set[e][a].y) + " " + std::to_string(structures[i]->set[e][a].z);
 			}
 		}
-		ooline += "\n";
+		line += "\n";
 		outputString += line;
 	}
-	int numStructures = structures.size() + totalStructures;
+	*/
+	int numStructures = structures.size();
 	//delete everything except output string
+	if (DEBUG) std::cout << "cleaning memory " << std::endl;
 	for (int i = 0; i < structures.size(); i++)
 	{
 		delete structures[i];
 	}
-	for (int i = 0; i < previousLocalMinima.size(); i++) delete previousLocalMinima[i];
 	//open a file and print the output
-	std::ofstream outputfile(outputFileName + "_" + std::to_string(numStructures) + ".txt");
-
+	//num structures is current and total structures is from previous runs. i believe there is an error with this
+	std::ofstream outputfile(outputFileName + "_" + std::to_string(numStructures + totalStructures) + ".txt");
+	
 	// Write to the file
 	outputfile << outputString;
 
 	// Close the file
 	outputfile.close();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 }
 
@@ -1724,7 +1891,7 @@ structure* optimize(structure& s)
 
 int main(int argv, char *argc[])
 {
-	/*
+	///*
 	std::vector<int> compositionC = { 1,4 };
 	std::vector<std::string> elementsE = { "C","H" };
 	//structure sss(8, 8, 8, compositionC, elementsE);
@@ -1737,30 +1904,13 @@ int main(int argv, char *argc[])
 	//basinHoppingEnergy(sss, 1000, "no", 20, 20, 20);
 	//std::cout << "starting tests pass?" << std::endl;
 	//return 0;
-
-	startModifiedBasinHopping(5, 5, 5, compositionC, elementsE, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, 100000, 1, 100, 30, "noOnecares", "testingOut", 20, 20, 20);
+	//
+	//startModifiedBasinHopping(5, 5, 5,10,20, compositionC, elementsE, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, 100000, 1, 100, 30, "newStart", "testingOut", 20, 20, 20);
+	continueModifiedBasinHopping("newStart_51.txt", basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, 10, 20, 100000, 1, 100, 30, "newStart_cont", "testingOut", 20, 20, 20);
 
 	return 0;
-	structure Ss(8, 8, 8, compositionC, elementsE);
-	double RIDthreshold = threshold(RID, compositionC, 5, 5, 5, 1, 0);
-	std::vector<structure*> structures = { };
-	std::vector<structure*> localMinima = {};
-	std::vector<std::set<int>> coordinationNumbers;
-	structure* s = getAcceptedStructure(5, 5, 5, elementsE, compositionC, structures, localMinima,20000, coordinationNumbers, 20, RIDthreshold);
-
-	std::cout << basinHoppingEnergy(*s, 1000, "no_task", 20, 20, 20);
-	structure* Xnew;
-	Xnew = new structure(*s, 1);
-	structures.push_back(Xnew);
-	if (DEBUG) std::cout << "calling energy of Xnew " << std::endl;
 	
-	double newEnergy = basinHoppingEnergy(*Xnew, 1001, "no task", 20, 20,20);
-	if (DEBUG) std::cout << "Xnew energy: " << newEnergy << std::endl;
-	Xnew->energy = newEnergy;
-	delete Xnew;
-	delete s;
-	return 0;
-	*/
+	//*/
 	/*
 	necessary arguments:
 	old or new project
@@ -1939,11 +2089,11 @@ int main(int argv, char *argc[])
 	if (continuePastRun)
 	{
 		if (DEBUG) std::cout << "continuing modified basin hopping: " << std::endl;
-		continueModifiedBasinHopping(previousFilename, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, coordinationSteps, time, localMinimaTrappingSteps, radialCriteriaPercent,outputFileName, taskName, a, b, c);
+		//continueModifiedBasinHopping(previousFilename, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, coordinationSteps, time, localMinimaTrappingSteps, radialCriteriaPercent,outputFileName, taskName, a, b, c);
 	}
 	else {
 		if (DEBUG) std::cout << "start modified basin hopping: " << std::endl;
-		startModifiedBasinHopping(x, y, z, composition, elements, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, coordinationSteps, time, localMinimaTrappingSteps, radialCriteriaPercent,outputFileName, taskName, a, b, c);
+		//startModifiedBasinHopping(x, y, z, composition, elements, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, coordinationSteps, time, localMinimaTrappingSteps, radialCriteriaPercent,outputFileName, taskName, a, b, c);
 	}
 
 

@@ -45,9 +45,8 @@ public:
 	structure(std::string input, std::vector<std::string> elements,std::vector<int> composition);
 	structure(double x, double y, double z, int n, bool sort = false);//random generation in range
 	structure(double x, double y, double z, std::vector<int> composition, std::vector<std::string> elements = {"B"}, bool sort = false);//random generation in range
-	structure(structure original, double variation, bool sort = false);//produce similar structure;
-	structure(structure original, double percentVariationX, double percentVariationY, double percentVariationZ, bool sort = false);
-	structure(structure original, double percentVariationX, double percentVariationY, double percentVariationZ, double rangeX, double rangeY, double rangeZ, bool sort = false);
+	structure(structure& original, double variationX, double variationY, double variationZ, double cellX, double cellY, double cellZ, bool sort = false);//produce similar structure;
+	structure(structure& original, double percentVariationX, double percentVariationY, double percentVariationZ, bool sort = false);
 	void radiusSort();
 	void rotateX(double degrees);
 	void rotateY(double degrees);
@@ -98,7 +97,7 @@ const double electronVolt = 1.602e-19;//joule
 int covalentRadii(std::string element, int bond);
 int vanDerWaalsRadii(std::string element);
 double picometersToAngstrom(int picometers);
-bool radialCriteria(structure s, int percent);
+bool radialCriteria(structure& s, int percent);
 
 
 #endif

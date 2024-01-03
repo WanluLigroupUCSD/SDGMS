@@ -251,7 +251,6 @@ double RID(structure& A, structure& B)
     //structure A
     if(!A.scored) scoreAtoms(A);
     if(!B.scored) scoreAtoms(B);
-    
     double totalA = 0;
     for (int t = 0; t < types; t++)
     {
