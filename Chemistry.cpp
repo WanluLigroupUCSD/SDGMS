@@ -180,9 +180,9 @@ structure::structure(double x, double y, double z, std::vector<int> composition,
         for (int i = 0; i < *it; i++)
         {
 
-            double newX = x * (2*(rand() % RAND_MAX) / RAND_MAX - 1);
-            double newY = y * (2*(rand() % RAND_MAX) / RAND_MAX - 1);
-            double newZ = z * (2*(rand() % RAND_MAX) / RAND_MAX - 1);
+            double newX = x * (2.0*(rand() % RAND_MAX) / RAND_MAX - 1);
+            double newY = y * (2.0*(rand() % RAND_MAX) / RAND_MAX - 1);
+            double newZ = z * (2.0*(rand() % RAND_MAX) / RAND_MAX - 1);
             atoms.push_back(atom(newX, newY, newZ));
             //std::cout << "new atom at " << newX << "," << newY << "," << newZ << std::endl;
         }
@@ -271,20 +271,20 @@ structure::structure(structure& original, double variationX, double variationY, 
         std::vector<atom> atoms;
         for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
         {
-            double varX = variationX * (2* rand() / RAND_MAX - 1);
+            double varX = variationX * (2.0* rand() / RAND_MAX - 1);
 			while((itt->x + varX) < -cellX || itt->x + varX > cellX)
 			{
-				varX = variationX * (2 * rand() / RAND_MAX - 1);
+				varX = variationX * (2.0 * rand() / RAND_MAX - 1);
 			}
-            double varY = variationY * (2* rand() / RAND_MAX - 1);
+            double varY = variationY * (2.0* rand() / RAND_MAX - 1);
 			while ((itt->y + varY) < -cellY || itt->y + varY > cellY)
 			{
-				varY = variationY * (2 * rand() / RAND_MAX - 1);
+				varY = variationY * (2.0 * rand() / RAND_MAX - 1);
 			}
-            double varZ = variationZ * (2* rand() / RAND_MAX - 1);
+            double varZ = variationZ * (2.0* rand() / RAND_MAX - 1);
 			while ((itt->z + varZ) < -cellZ || itt->z + varZ > cellZ)
 			{
-				varZ = variationZ * (2 * rand() / RAND_MAX - 1);
+				varZ = variationZ * (2.0 * rand() / RAND_MAX - 1);
 			}
 
             atom at = atom(itt->x + varX, itt->y + varY, itt->z + varZ);

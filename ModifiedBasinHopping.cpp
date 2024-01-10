@@ -623,6 +623,42 @@ void writeToCP2K(structure& s, std::string task, std::string filename, std::stri
 	file.close();
 }
 
+void writeToGuassian(structure& s, std::string task, std::string filename, std::string basis_name, int charge = 0, int state = 1)
+{
+	//a,b,c are useless for guassian? so is potential name. the variables are left here for compatibility.
+	/*
+	
+	# HF/6-31G(d)	Route section
+ 
+water energy	Title section
+ 
+0   1	Molecule specification
+O  -0.464   0.177   0.0	 
+H  -0.464   1.137   0.0	 
+H   0.441  -0.143   0.0
+	*/
+	//route section
+	std::string outString = "# " + basis_name + "\n\n";
+	//title section
+	outString += task + "\n\n";
+	//molecule specification, charge, state singlet doublet triplet
+	outString += std::to_string(charge) + " " + std::to_string(state);
+	//molecules
+	for (int e = 0; e < s.set.size(); e++)
+	{
+		for (int atom = 0; atom < s.set[e].size(); atom++)
+		{
+			outString += "\n" + s.elements[e] + " " + std::to_string(s.set[e][atom].x) + " " + std::to_string(s.set[e][atom].y) + " " + std::to_string(s.set[e][atom].z);
+		}
+	}
+	outString += "\n\n";//blank line at the end of the structure is required
+	std::ofstream file(filename);
+	file << outString;
+	file.close();
+	
+
+
+}
 double basinHoppingEnergy(structure& s, int ittt, std::string task, double a, double b, double c)
 {
 	if (DEBUG > 1)
@@ -833,6 +869,139 @@ double energyCP2K(structure& s, int ittt, std::string task, double a, double b, 
 	return value;
 }
 
+
+double energyGuassian(structure& s, int ittt, std::string task,std::string basis,int charge = 0, int state = 0)
+{
+	//outfile name should end in log, not sure what the input should end in
+
+	//these a b c are for cell shape
+	std::string guassianTaskName = task + " energy";
+
+	std::string fileName = task + "_" + std::to_string(ittt) + "_" + std::to_string(rand() / 10);
+	std::string inFileName = fileName + ".com";
+	std::string outFileName = fileName + ".log";
+
+	writeToGuassian(s, guassianTaskName, inFileName, basis, charge, state);
+
+	//ensure file has been written
+	std::string checker;
+	std::ifstream* guassianInput = new std::ifstream(inFileName);
+
+	while (!getline(*guassianInput, checker))
+	{
+		guassianInput->close();
+		delete guassianInput;
+		guassianInput = new std::ifstream(inFileName);
+	}
+	guassianInput->close();
+	delete guassianInput;
+	std::cout << "input file written" << std::endl;
+
+	std::string guassiancommand = "g16 <" + inFileName + " >" + outFileName;
+
+	//"cd \"\"" + cp2kpath + "\"\"\nstartcp2k -i testingCH4_1_929_in.txt -o " + outFileName + ".txt";
+		//std::string cp2kcommand = "cd \"\"" + cp2kpath + "\"\"\nstartcp2k -i " + inFileName + ".txt -o " + outFileName + ".txt\n";
+	std::cout << "printing input" << std::endl;
+
+	char* gc = new char[guassiancommand.length() + 1];
+	for (int i = 0; i < guassiancommand.length(); i++)
+	{
+		gc[i] = guassiancommand[i];
+	}
+	gc[guassiancommand.length()] = '\0';
+	std::cout << "command: " << gc << std::endl;
+
+	std::cout << "writing command" << std::endl;
+	std::cout << "command: " << gc << std::endl;
+	time_t start = time(0);
+	std::system(gc);
+	//std::cout << "command written" << std::endl;
+
+	std::ifstream* gOutFile = new std::ifstream(outFileName);
+
+
+	//stall for cp2k to finish
+	std::cout << "checking for guassian completion" << std::endl;
+	
+
+
+	while (!getline(*gOutFile, checker))
+	{
+		gOutFile->close();
+		delete gOutFile;
+		gOutFile = new std::ifstream(outFileName);
+	}
+	std::cout << "guassian started" << std::endl;
+	//the file is located but energy may not be calculated yet
+	bool energyCalculated = false;
+	std::string energyLine;
+	while (!energyCalculated)
+	{
+		//reopen file to get new updates
+		gOutFile->close();
+		delete gOutFile;
+		gOutFile = new std::ifstream(outFileName);
+
+		//look for the energy line
+		while (!energyCalculated) {
+			//if getline is included in the while statement conditional then energy line will advance after the loop closes and point to the wrong line
+			if (getline(*gOutFile, energyLine))
+			{
+				std::string match = " SCF Done:  E";
+
+				if (energyLine.size() > match.size())
+				{
+					bool matching = true;
+					for (int m = 0; m < match.size(); m++)
+					{
+						if (energyLine[m] != match[m]) matching = false;
+					}
+					energyCalculated = matching;
+				}
+			}
+			else {
+				break;
+			}
+			
+		}
+	}
+
+	double seconds_since_start = difftime(time(0), start);
+	std::cout << "guassian time: " << seconds_since_start << std::endl;
+	std::cout << "reading file" << std::endl;
+
+	//find the start of the energy
+	int eStart = 0;
+	int eFin = 0;
+	bool equalPassed = false;
+	for (int i = 0; i < energyLine.size(); i++)
+	{
+		if(eFin){}
+		else if (eStart) {
+			if (energyLine[i] == ' ')
+			{
+				eFin = i;
+			}
+		}
+		else if (equalPassed) {
+			if (energyLine[i] == ' ') {}
+			else eStart = i;
+		}
+		else if (energyLine[i] == '=') equalPassed = true;
+		
+	}
+	//if(DEBUG > 1) std::cout << energyLine.substr(eStart, eFin - eStart) << std::endl;
+	double energyHartree = std::stod(energyLine.substr(eStart, eFin - eStart));
+
+	
+
+
+	// Close the file
+	gOutFile->close();
+	delete gOutFile;
+	std::cout << "energy: " << energyHartree << std::endl;
+	return energyHartree;
+}
 structure* getAcceptedStructure(double x, double y, double z, std::vector<std::string> elements, std::vector<int> composition, std::vector<structure*>& structures, std::vector<structure*>& localMinima, int coordinationSteps, std::vector<std::set<int>>& coordinationNumbers, int radialCriteriaPercent, double RIDthreshold )
 {
 	structure* retValue = nullptr;
@@ -1891,9 +2060,18 @@ structure* optimize(structure& s)
 
 int main(int argv, char *argc[])
 {
+	
 	///*
+	std::vector<int> compositionB = { 3 };
+	std::vector<std::string> elementsB = { "B" };
+	structure s(5, 5, 5, compositionB, elementsB);
+
+	//writeToGuassian(s, "boron energy", "boron_t.com", "b3lyp/6-31+g(d,p)", 0, 2);
+	energyGuassian(s, 1, "boronTest", "b3lyp/6-31+g(d,p)", 0, 2);
+	return 1;
 	std::vector<int> compositionC = { 1,4 };
 	std::vector<std::string> elementsE = { "C","H" };
+
 	//structure sss(8, 8, 8, compositionC, elementsE);
 	//structure ss2(8, 8, 8, compositionC, elementsE);
 	//RID(sss, ss2);

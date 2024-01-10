@@ -1,8 +1,9 @@
 #ifndef dHeur
 #define dHeur
 
-
-
+#ifndef DBL_MAX
+#define DBL_MAX 1.79769e+308;
+#endif
 #include "chemistry.hpp"
 //no rotation algorithms
 double distanceFast(structure A, structure B);
