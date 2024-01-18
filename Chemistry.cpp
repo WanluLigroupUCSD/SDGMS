@@ -599,6 +599,18 @@ void structure::generateCoordinationNumbers(int percent)
 	}
 }
 
+void structure::print()
+{
+	for (int i = 0; i < this->elements.size(); i++)
+	{
+		std::cout << this->elements[i] << std::endl;
+		for (int j = 0; j < this->set[i].size(); j++)
+		{
+			std::cout << this->set[i][j].x << " " << this->set[i][j].y << " " << this->set[i][j].z << std::endl;
+		}
+	}
+}
+
 
 //chemistry
 int covalentRadii(std::string element, int bond)
@@ -1157,6 +1169,31 @@ int covalentRadii(std::string element, int bond)
 	return 0;
 }
 
+std::string atomicNumber(int num)
+{
+	switch (num)
+	{
+	case 1:
+		return "H";
+	case 2:
+		return "He";
+	case 3:
+		return "Li";
+	case 4:
+		return "Be";
+	case 5:
+		return "B";
+	case 6:
+		return "C";
+	case 7:
+		return "N";
+	case 8:
+		return "O";
+	default:
+		return "todo";
+	}
+	return "todo";
+}
 
 int vanDerWaalsRadii(std::string element)
 {

@@ -52,6 +52,7 @@ public:
 	void rotateY(double degrees);
 	void rotateZ(double degrees);
 	void generateCoordinationNumbers(int percent);
+	void print();
 	std::vector<std::vector<atom>> set;//first vector is atom types, second is atoms;
 	std::vector<std::vector<int>> coordinationNumbers;
 	std::vector<int> composition;
@@ -98,6 +99,7 @@ int covalentRadii(std::string element, int bond);
 int vanDerWaalsRadii(std::string element);
 double picometersToAngstrom(int picometers);
 bool radialCriteria(structure& s, int percent);
+std::string atomicNumber(int num);
 
 
 #endif

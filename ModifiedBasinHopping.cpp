@@ -623,8 +623,9 @@ void writeToCP2K(structure& s, std::string task, std::string filename, std::stri
 	file.close();
 }
 
-void writeToGuassian(structure& s, std::string task, std::string filename, std::string basis_name, int charge = 0, int state = 1)
+void writeToGuassian(structure& s, std::string task, std::string filename, std::string basis_name,std::string method, int charge = 0, int state = 1, int maxCycles = 0, int maxSCF = 129)
 {
+	//max cycles = 0 implies this is just energy and no optimization
 	//a,b,c are useless for guassian? so is potential name. the variables are left here for compatibility.
 	/*
 	
@@ -638,7 +639,9 @@ H  -0.464   1.137   0.0
 H   0.441  -0.143   0.0
 	*/
 	//route section
-	std::string outString = "# " + basis_name + "\n\n";
+	std::string outString = "# " + method + "/" + basis_name;
+	if(maxCycles > 0) outString += " Opt=(MaxCycles=" + std::to_string(maxCycles) + ") SCF=(MaxCycle=" + std::to_string(maxSCF) + ")";
+	outString += "\n\n";
 	//title section
 	outString += task + "\n\n";
 	//molecule specification, charge, state singlet doublet triplet
@@ -870,7 +873,7 @@ double energyCP2K(structure& s, int ittt, std::string task, double a, double b, 
 }
 
 
-double energyGuassian(structure& s, int ittt, std::string task,std::string basis,int charge = 0, int state = 0)
+double energyGuassian(structure& s, int ittt, std::string task,std::string basis,std::string method,int charge = 0, int state = 0)
 {
 	//outfile name should end in log, not sure what the input should end in
 
@@ -881,7 +884,7 @@ double energyGuassian(structure& s, int ittt, std::string task,std::string basis
 	std::string inFileName = fileName + ".com";
 	std::string outFileName = fileName + ".log";
 
-	writeToGuassian(s, guassianTaskName, inFileName, basis, charge, state);
+	writeToGuassian(s, guassianTaskName, inFileName, basis, method,charge,state);
 
 	//ensure file has been written
 	std::string checker;
@@ -967,7 +970,7 @@ double energyGuassian(structure& s, int ittt, std::string task,std::string basis
 	}
 
 	double seconds_since_start = difftime(time(0), start);
-	std::cout << "guassian time: " << seconds_since_start << std::endl;
+	std::cout << "gaussian time: " << seconds_since_start << std::endl;
 	std::cout << "reading file" << std::endl;
 
 	//find the start of the energy
@@ -1002,6 +1005,270 @@ double energyGuassian(structure& s, int ittt, std::string task,std::string basis
 	std::cout << "energy: " << energyHartree << std::endl;
 	return energyHartree;
 }
+
+structure* optimizationGaussian(structure& s, int ittt, std::string task, std::string basis, std::string method, int maxCycles, int charge = 0, int state = 0, int maxSCF = 129)
+{
+	//the method should be HF instead of DFT for better convergence
+	//outfile name should end in log, not sure what the input should end in
+
+
+	std::string guassianTaskName = task + " opt";
+
+	std::string fileName = task + "_" + std::to_string(ittt) + "_" + std::to_string(rand() / 10);
+	std::string inFileName = fileName + ".com";
+	std::string outFileName = fileName + ".log";
+
+	writeToGuassian(s, guassianTaskName, inFileName, basis, method, charge, state, maxCycles,maxSCF);
+
+	//ensure file has been written
+	std::string checker;
+	std::ifstream* guassianInput = new std::ifstream(inFileName);
+
+	while (!getline(*guassianInput, checker))
+	{
+		guassianInput->close();
+		delete guassianInput;
+		guassianInput = new std::ifstream(inFileName);
+	}
+	guassianInput->close();
+	delete guassianInput;
+	std::cout << "input file written" << std::endl;
+
+	std::string guassiancommand = "g16 <" + inFileName + " >" + outFileName;
+
+	//"cd \"\"" + cp2kpath + "\"\"\nstartcp2k -i testingCH4_1_929_in.txt -o " + outFileName + ".txt";
+		//std::string cp2kcommand = "cd \"\"" + cp2kpath + "\"\"\nstartcp2k -i " + inFileName + ".txt -o " + outFileName + ".txt\n";
+	std::cout << "printing input" << std::endl;
+
+	char* gc = new char[guassiancommand.length() + 1];
+	for (int i = 0; i < guassiancommand.length(); i++)
+	{
+		gc[i] = guassiancommand[i];
+	}
+	gc[guassiancommand.length()] = '\0';
+	std::cout << "command: " << gc << std::endl;
+
+	std::cout << "writing command" << std::endl;
+	std::cout << "command: " << gc << std::endl;
+	time_t start = time(0);
+	std::system(gc);
+	//std::cout << "command written" << std::endl;
+
+	std::ifstream* gOutFile = new std::ifstream(outFileName);
+
+
+	//stall for cp2k to finish
+	std::cout << "checking for guassian completion" << std::endl;
+
+
+
+	while (!getline(*gOutFile, checker))
+	{
+		gOutFile->close();
+		delete gOutFile;
+		gOutFile = new std::ifstream(outFileName);
+	}
+	std::cout << "guassian started" << std::endl;
+
+	//the file is writing complete?
+	bool finishedOutput = false;
+
+	std::string outLine;
+	while (!finishedOutput)
+	{
+		//reopen file to get new updates
+		gOutFile->close();
+		delete gOutFile;
+		gOutFile = new std::ifstream(outFileName);
+
+		//look for the energy line
+		while (getline(*gOutFile, outLine)) {
+			//if getline is included in the while statement conditional then energy line will advance after the loop closes and point to the wrong line
+
+			std::string match = " Job cpu time:";
+
+			if (outLine.size() > match.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < match.size(); m++)
+				{
+					if (outLine[m] != match[m]) matching = false;
+				}
+				if(matching) finishedOutput = true;//cannot be made false
+			}
+		}
+
+	}
+	
+
+	double seconds_since_start = difftime(time(0), start);
+	std::cout << "gaussian time: " << seconds_since_start << std::endl;
+	std::cout << "reading file" << std::endl;
+
+	//find the start of the optimization
+	//this will take the orientation everytime but iguess thats ok
+	//restart the file just incase
+	gOutFile->close();
+	delete gOutFile;
+	gOutFile = new std::ifstream(outFileName);
+	std::string cline;
+	structure *st = nullptr;
+
+	//bool buggo = true;
+	//if (buggo) std::cout << "opening line one" << std::endl;
+	std::string matchString = "Input orientation:";
+	while (getline(*gOutFile, cline)) {
+		//if (buggo) std::cout << "line one opened" << std::endl;
+		if (cline.length() > matchString.length())
+		{
+
+			bool matching = false;
+			int matchIt = 0;
+			//if (buggo) std::cout << "checking matches" << std::endl;
+
+			for (int l = 0; l < cline.length() - matchString.length(); l++)
+			{
+				//if (buggo) std::cout << "l=" << l << " cline length: " << cline.length() << " , length - match: " << cline.length() - matchString.length() << " match string: " << matchString << std::endl;
+				if (cline[l] == matchString[matchIt])
+				{
+					//if (buggo) std::cout << "match" << std::endl;
+					matchIt++;
+					matching = true;
+				}
+				else if (matchIt < 18) {
+					//if (buggo) std::cout << "no match" << std::endl;
+					//if (matchIt > 10 && buggo) std::cout << "closed early on: " << cline << " with a matchit of " << matchIt << " and a l of " << l << " and a cline length of " << cline.length() << " and a matchit length of " << matchString.length() << std::endl;
+					matchIt = 0;
+					matching = false;
+				}
+				else {
+					//the strings are already matched let the match go through
+				}
+			}
+			if (matching) std::cout << "matching ends check length: " << matchIt << " " << matchString.length() << std::endl;
+			if (matching && matchIt >= matchString.length())
+			{
+				//if (buggo) std::cout << "matched" << std::endl;
+				//a geometry has been identified
+
+				//create set of atoms for those inside
+				std::vector<std::vector<atom>> set;
+				std::vector<std::string> elements;
+				//the next 4 lines do not contain atom info
+				//if (buggo) std::cout << "skipping 4 lines" << std::endl;
+				getline(*gOutFile, cline);
+				getline(*gOutFile, cline);
+				getline(*gOutFile, cline);
+				getline(*gOutFile, cline);
+				char space = ' ';
+				
+				
+				//if (buggo) std::cout << "reading an atom" << std::endl;
+
+				while (getline(*gOutFile, cline) && cline[1] != '-')
+				{
+					std::string cnumber = "";
+
+					//if (buggo) std::cout << cline << std::endl;
+					int num = 0;
+					std::string element;
+					double x = 0;
+					double y = 0;
+					double z = 0;
+					for (int i = 0; i < cline.length(); i++)
+					{
+						if (cline[i] == space)
+						{
+							if (cnumber.length() > 0)
+							{
+								//if (buggo) std::cout << "cnumber larger than one. it is " << cnumber << std::endl;
+								num++;
+								switch (num)
+								{
+								case 1:
+									//center number, not sure what this is for. do nothing
+									break;
+								case 2:
+									//atomic number
+									element = atomicNumber(std::stoi(cnumber));
+									break;
+								case 3:
+									//atomic type, not sure what this is. do nothing.
+									break;
+								case 4:
+									//x coordinate
+									x = std::stof(cnumber);
+									break;
+								case 5:
+									//y
+									y = std::stof(cnumber);
+									break;
+								case 6:
+									//z
+									z = std::stof(cnumber);
+									break;
+								default:
+									break;
+
+								}
+								cnumber = "";
+							}
+							//else {
+								//if (buggo) std::cout << "current char not large than one" << std::endl;
+							//}
+
+						}
+						else {
+							std::cout << "adding " << std::to_string(cline[i]) << " or " << cline[i] << "? to cnumber" << std::endl;
+							cnumber += cline[i];
+						}
+					}
+					//figure out which set this belongs to.
+					int index = -1;
+					for (int i = 0; i < elements.size(); i++)
+					{
+						if (elements[i] == element)
+						{
+							index = i;
+						}
+					}
+					//if (buggo) std::cout << "making atom for elemental index " << index << " with coords " << x << " " << y << " " << z << std::endl;
+					if (index == -1)
+					{
+						//if (buggo) std::cout << "not yet indexed" << std::endl;
+						//atom type not yet indexed
+						elements.push_back(element);
+						std::vector < atom> alist = { atom(x,y,z) };
+						set.push_back(alist);
+					}
+					else {
+						//if (buggo) std::cout << "pushing back" << std::endl;
+						set[index].push_back(atom(x, y, z));
+					}
+				}
+				//if (buggo) std::cout << "this structure is not the last one starting over with next" << std::endl;
+
+				if (st != nullptr) delete st;
+				st = new structure(set, elements);
+
+
+			}
+			//else if (buggo) std::cout << "no match" << std::endl;
+
+		}
+			//structure(std::vector<std::vector<atom>> set, std::vector<std::string> elements, bool sort = false)
+		
+	}
+	// Close the file
+	//if there was no convergence then nullptr will be returned
+	//if (buggo) std::cout << "closing" << std::endl;
+	gOutFile->close();
+	delete gOutFile;
+	return st;
+	//return energyHartree;
+}
+
+
 structure* getAcceptedStructure(double x, double y, double z, std::vector<std::string> elements, std::vector<int> composition, std::vector<structure*>& structures, std::vector<structure*>& localMinima, int coordinationSteps, std::vector<std::set<int>>& coordinationNumbers, int radialCriteriaPercent, double RIDthreshold )
 {
 	structure* retValue = nullptr;
@@ -1021,7 +1288,7 @@ structure* getAcceptedStructure(double x, double y, double z, std::vector<std::s
 				if (DEBUG) std::cout << "did not pass criteria ";
 				if (DEBUG) {
 					if (coordinationNumber(*retValue, coordinationNumbers)) std::cout << " radial" << std::endl;
-					else std::cout << " coordination numbers" << std::endl;
+else std::cout << " coordination numbers" << std::endl;
 				}
 				delete retValue;
 				retValue = new structure(x, y, z, composition, elements);
@@ -2060,14 +2327,20 @@ structure* optimize(structure& s)
 
 int main(int argv, char *argc[])
 {
-	
+	srand(time(NULL));
 	///*
 	std::vector<int> compositionB = { 3 };
 	std::vector<std::string> elementsB = { "B" };
-	structure s(5, 5, 5, compositionB, elementsB);
+	structure s(5, 5, 0, compositionB, elementsB);
 
-	//writeToGuassian(s, "boron energy", "boron_t.com", "b3lyp/6-31+g(d,p)", 0, 2);
-	energyGuassian(s, 1, "boronTest", "b3lyp/6-31+g(d,p)", 0, 2);
+	structure* s2 = optimizationGaussian(s, 1, "boron", "6-31+g(d,p)", "HF", 3, -1, 1,129);
+	std::cout << "made it to tge print" << std::endl;
+	s2->print();
+	delete s2;
+	//writeToGuassian(s, "boron energy", "boron_opto.com", "6-31+g(d,p)", "b3lyp", 2,-1,1,129);
+
+
+	//energyGuassian(s, 1, "boronTest", "b3lyp/6-31+g(d,p)", 0, 2);
 	return 1;
 	std::vector<int> compositionC = { 1,4 };
 	std::vector<std::string> elementsE = { "C","H" };
