@@ -367,6 +367,48 @@ structure::structure(structure& original, double variationX, double variationY, 
     }
     if (sort)this->radiusSort();
 }
+structure::structure(structure& original, std::vector<double> variation) :elements(original.elements)
+{
+	//makes variants of at most variation x,y,z
+	int varIterator = 0;
+	for (std::vector<std::vector<atom>>::iterator it = original.set.begin(); it != original.set.end(); it++)
+	{
+		std::vector<atom> atoms;
+		for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
+		{
+			atom at = atom(itt->x + variation[varIterator++], itt->y + variation[varIterator++], itt->z + variation[varIterator++]);
+			atoms.push_back(at);
+		}
+		set.push_back(atoms);
+	}
+
+	double totalX = 0.0;
+	double totalY = 0.0;
+	double totalZ = 0.0;
+	int n = 0;
+	for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++)
+	{
+		for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
+		{
+			n++;
+			totalX += itt->x;
+			totalY += itt->y;
+			totalZ += itt->z;
+		}
+	}
+	x = totalX / (double)n;
+	y = totalY / (double)n;
+	z = totalZ / (double)n;
+
+	for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++)
+	{
+		composition.push_back(it->size());
+		for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
+		{
+			itt->polarCenter(x, y, z);
+		}
+	}
+}
 /*structure::structure(structure& original, double variationX, double variationY, double variationZ, double rangeX, double rangeY, double rangeZ, bool sort) :elements(original.elements)
 {
     //makes variants of structure original where the minimum variation is varX,y& z and maximum is range
@@ -1338,7 +1380,7 @@ bool radialCriteria(structure& s, int percent)
 
 	//the percent refers to the accepted deviation from the covalent bonding radius
 	*/
-
+	bool bugging = false;
 	//for each atom a in s
 	for (int i = 0; i < s.set.size(); i++)
 	{
@@ -1361,27 +1403,40 @@ bool radialCriteria(structure& s, int percent)
 							double bl1r = bl1 * ((double)percent / (double)100);
 							if (dist > bl1 - bl1r && dist < bl1 + bl1r) accept = true;
 							else {
+								if (bugging) std::cout << "not accepted for being within the covalent radius of " << s.elements[i] << a << " which is ," << picometersToAngstrom(covalentRadii(s.elements[i], 1)) << ", versus " <<  dist << " +/- " << bl1r << std::endl;
 								double bl2 = picometersToAngstrom(covalentRadii(s.elements[i], 2));
 								if (bl2 != 0)
 								{
 									double bl2r = bl2 * ((double)percent / (double)100);
 									if (dist > bl2 - bl2r && dist < bl2 + bl2r) accept = true;
 									else {
+										if (bugging) std::cout << "not accepted for being within the second covalent radius of " << s.elements[i] << a << " which is ," << picometersToAngstrom(covalentRadii(s.elements[i], 2)) << ", versus " << dist << " +/- " << bl2r << std::endl;
+
 										double bl3 = picometersToAngstrom(covalentRadii(s.elements[i], 3));
 										if (bl3 != 0)
 										{
 											double bl3r = bl3 * ((double)percent / (double)100);
 											if (dist > bl3 - bl3r && dist < bl3 + bl3r) accept = true;
+											else if (bugging) std::cout << "not accepted for being within the third covalent radius of " << s.elements[i] << a << " which is ," << picometersToAngstrom(covalentRadii(s.elements[i], 3)) << ", versus " << dist << " +/- " << bl3r << std::endl;
+
 										}
 									}
+								}
+								else {
+									if (bugging) std::cout << "bl2 analysis skipped for missing data" << std::endl;
 								}
 
 
 
 
 							}
-							if (!accept) return false;
+							if (!accept) {
+								if(bugging) std::cout << "failed for no covalent bond between " << s.elements[i] << a << " and " << s.elements[j] << b << std::endl;
+
+								return false;
+							}
 						}
+						else if (bugging) std::cout << "outside of van der waals for " << s.elements[i] << a << " and " << s.elements[j] << b << " being longer than the van der waals radii," << picometersToAngstrom(vanDerWaalsRadii(s.elements[i])) << ", of " << s.elements[i] << a << " at " << dist << std::endl;
 
 
 					}

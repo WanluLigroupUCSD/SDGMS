@@ -305,8 +305,11 @@ double RID(structure& A, structure& B)
     return totalA + totalB;
 }
 
-double threshold(std::function<double(structure&, structure&)> heuristic, std::vector<int> composition, double rangeX, double rangeY, double rangeZ, double similar, int percent)
+
+double threshold(std::function<double(structure&, structure&)> heuristic, std::vector<int> composition, double rangeX, double rangeY, double rangeZ, double similar,double moveX, double moveY, double moveZ, double percent)
 {
+    //we want to differentiate similar structures from structures that are likely to be generated from movements.
+
     //composition is a list of integers. each integer represents a type of atom and its value represents the number of atoms
     //similar is the variation allowed on each point where it can be considered a similar structure (percentage of the range)
     //different is the variation on each point where it would no longer be considered a similar structure (percentage of the range)
@@ -320,10 +323,29 @@ double threshold(std::function<double(structure&, structure&)> heuristic, std::v
 
     for (int i = 0; i < trials; i++)
     {
-        if ((i+1) % 1000 == 0) std::cout << i / 100 << "% of trials generated" << std::endl;
         structure A = structure(rangeX, rangeY, rangeZ, composition);
-        structure S = structure(A, similar/100 * rangeX, similar/100 * rangeY, similar/100 * rangeZ);
-        structure D = structure(A, similar/100 * rangeX, similar/100 * rangeY, similar/100 * rangeZ,rangeX,rangeY,rangeZ);
+        std::vector<double> movementDifferent;
+        std::vector<double> movementSimilar;
+        int tParameters = 0;
+        for (int i = 0; i < A.elements.size(); i++)
+        {
+            for (int j = 0; j < A.set[i].size(); j++)
+            {
+                //should this be randomized between -1 to 1?
+                movementSimilar.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * moveX * percent / 100);
+                movementDifferent.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1)* moveX);
+                movementSimilar.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * moveY * percent / 100);
+                movementDifferent.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * moveY);
+                movementSimilar.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * moveZ * percent / 100);
+                movementDifferent.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * moveZ);
+
+            }
+        }
+
+        if ((i+1) % 1000 == 0) std::cout << i / 100 << "% of trials generated" << std::endl;
+        
+        structure S = structure(A, movementSimilar);
+        structure D = structure(A, movementDifferent);
 
         heuristicSimilar.push_back(heuristic(A, S));
         heuristicDifferent.push_back(heuristic(A, D));

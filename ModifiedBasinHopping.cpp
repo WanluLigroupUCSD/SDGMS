@@ -1336,19 +1336,33 @@ else std::cout << " coordination numbers" << std::endl;
 	return retValue;
 }
 
-void startModifiedBasinHopping(double x, double y, double z,double percentChangeI, double percentChangeF, std::vector<int> composition, std::vector<std::string> elements,int charge, int state, std::string method, std::string basis,int optimizationIterations,int coordinationSteps, int time, int localMinimaTrapping,int radialCriteriaPercent, std::string outputFileName, std::string taskName,double a, double b, double c)
+void startModifiedBasinHopping(double x, double y, double z,double percentChangeI, double percentChangeF, std::vector<int> composition, std::vector<std::string> elements,int charge, int state, char calculator, std::string method, std::string basis,int optimizationIterations,int coordinationSteps,int HFsteps, int time, int localMinimaTrapping,int radialCriteriaPercent, std::string outputFileName, std::string taskName,double a, double b, double c)
 {
 	std::vector<structure*> structures = { };
 	std::vector<structure*> localMinima = {};
 	std::vector<std::set<int>> coordinationNumbers;
-	double RIDthreshold = threshold(RID,composition, x, y, z, 1, 0);
-	structure* s = getAcceptedStructure(x, y, z, elements, composition, structures,localMinima, coordinationSteps, coordinationNumbers, radialCriteriaPercent, RIDthreshold);
+	double RIDthreshold = threshold(RID,composition, a, b, c, 1, 0,x,y,z);
+	structure* s = getAcceptedStructure(a, b, c, elements, composition, structures,localMinima, coordinationSteps, coordinationNumbers, radialCriteriaPercent, RIDthreshold);
 	
 
 		//new structure(x, y, z, composition, elements);
 	int energyCall = 1;
 
-	double seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
+	double seedEnergy;
+	switch (calculator)
+	{
+	case 'b':
+		//basin hopping energy
+		seedEnergy = basinHoppingEnergy(*s, energyCall++, taskName, a, b, c);
+		break;
+	case 'g':
+		//gaussain energy
+		seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
+		break;
+	default:
+		seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
+		break;
+	} 
 
 	if(DEBUG) std::cout << "seed structure energy: " << seedEnergy << std::endl;
 	//check it passes radial criteria?
@@ -1369,8 +1383,8 @@ void startModifiedBasinHopping(double x, double y, double z,double percentChange
 	auto duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
 	double hours = (double)duration.count() / (double)60;
 	if (DEBUG) std::cout << "chours:  " << hours << " ; time limit: " << double(time) - 0.5 <<  std::endl;
-	//int maxint_ = 0;//remove later!
-	while (hours < double(time) - 0.5/* && 50 > maxint_++*/)
+	int maxint_ = 0;//remove later!
+	while (hours < double(time) - 0.5 && 100 > maxint_++)
 	{
 		if (DEBUG) std::cout << "step: " << step << " time: " << double(time) << std::endl;
 		step += 1;
@@ -1428,9 +1442,24 @@ void startModifiedBasinHopping(double x, double y, double z,double percentChange
 				}
 			}
 			*/
-			s = getAcceptedStructure(x, y, z, elements, composition, structures, localMinima, coordinationSteps, coordinationNumbers, radialCriteriaPercent, RIDthreshold);
+			s = getAcceptedStructure(a, b, c, elements, composition, structures, localMinima, coordinationSteps, coordinationNumbers, radialCriteriaPercent, RIDthreshold);
 			// a new seed to start with in s that is unique and passes criteria
-			double seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
+			double seedEnergy;
+			//= energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
+			switch (calculator)
+			{
+			case 'b':
+				//basin hopping energy
+				seedEnergy = basinHoppingEnergy(*s, energyCall++, taskName, a, b, c);
+				break;
+			case 'g':
+				//gaussain energy
+				seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
+				break;
+			default:
+				seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
+				break;
+			}
 			if (DEBUG) std::cout << "new seed found: " << seedEnergy << std::endl;
 			structures.push_back(s);
 			stepsSinceNew = 0;
@@ -1447,7 +1476,25 @@ void startModifiedBasinHopping(double x, double y, double z,double percentChange
 		double variationX = x* sigmoidPercentageFromStep /100;
 		double variationY = y * sigmoidPercentageFromStep / 100;
 		double variationZ = z * sigmoidPercentageFromStep / 100;
-		Xnew = new structure(*s, variationX, variationY, variationZ, a,b,c);
+		//create the movement vector
+		//get number of atoms first
+		//movement parameters are based on sigmoid variation from step on x,y,z maximum change.
+		//maybe later this should be changed to based the slope of the gradient which can be determiend from the proportion of change in energy to last movement.
+		std::vector<double> movement;
+		for (int i = 0; i < s->elements.size(); i++)
+		{
+			for (int j = 0; j < s->set[i].size(); j++)
+			{
+				//should this be randomized between -1 to 1?
+				//x, y , z are the maximum movement, defining those parameters.
+				movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x * sigmoidPercentageFromStep / 100);
+				movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y * sigmoidPercentageFromStep / 100);
+				movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z * sigmoidPercentageFromStep / 100);
+
+			}
+		}
+		Xnew = new structure(*s, movement);//new way
+		//Xnew = new structure(*s, variationX, variationY, variationZ, a,b,c);
 		//tests
 		/*
 		//std::cout << "calculating energy right now!" << std::endl;
@@ -1483,10 +1530,25 @@ void startModifiedBasinHopping(double x, double y, double z,double percentChange
 				}
 				delete Xnew;
 				double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
-				double variationX = x * sigmoidPercentageFromStep / 100;
-				double variationY = y * sigmoidPercentageFromStep / 100;
-				double variationZ = z * sigmoidPercentageFromStep / 100;
-				Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
+				//double variationX = x * sigmoidPercentageFromStep / 100;
+				//double variationY = y * sigmoidPercentageFromStep / 100;
+				//double variationZ = z * sigmoidPercentageFromStep / 100;
+				//Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
+				std::vector<double> movement;
+				for (int i = 0; i < s->elements.size(); i++)
+				{
+					for (int j = 0; j < s->set[i].size(); j++)
+					{
+						//should this be randomized between -1 to 1?
+						//x, y , z are the maximum movement, defining those parameters.
+						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x * sigmoidPercentageFromStep / 100);
+						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y * sigmoidPercentageFromStep / 100);
+						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z * sigmoidPercentageFromStep / 100);
+
+					}
+				}
+				Xnew = new structure(*s, movement);//new way
+
 			}
 		}
 		else {
@@ -1495,10 +1557,24 @@ void startModifiedBasinHopping(double x, double y, double z,double percentChange
 				if (DEBUG) std::cout << "did not pass criteria (radial) " << std::endl;
 				delete Xnew;
 				double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
-				double variationX = x * sigmoidPercentageFromStep / 100;
-				double variationY = y * sigmoidPercentageFromStep / 100;
-				double variationZ = z * sigmoidPercentageFromStep / 100;
-				Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
+				//double variationX = x * sigmoidPercentageFromStep / 100;
+				//double variationY = y * sigmoidPercentageFromStep / 100;
+				//double variationZ = z * sigmoidPercentageFromStep / 100;
+				//Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
+				std::vector<double> movement;
+				for (int i = 0; i < s->elements.size(); i++)
+				{
+					for (int j = 0; j < s->set[i].size(); j++)
+					{
+						//should this be randomized between -1 to 1?
+						//x, y , z are the maximum movement, defining those parameters.
+						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x * sigmoidPercentageFromStep / 100);
+						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y * sigmoidPercentageFromStep / 100);
+						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z * sigmoidPercentageFromStep / 100);
+
+					}
+				}
+				Xnew = new structure(*s, movement);//new way
 			}
 		}
 
@@ -1536,16 +1612,57 @@ void startModifiedBasinHopping(double x, double y, double z,double percentChange
 			*/
 			//optimize Xnew
 			//Xnew = optimize(*Xnew);
-			structure* tempXnew = optimizationGaussian(*Xnew, step, taskName, basis, method, optimizationIterations, charge, state);
-			delete Xnew;
-			Xnew = tempXnew;
+			std::string cmethod = "HF";
+			if (localMinima.size() > HFsteps)
+			{
+				cmethod = cmethod;
+			}
+			if (optimizationIterations > 0) {
+				switch (calculator)
+				{
+				case 'b':
+					//basin hopping energy
+					//no optimization
+					break;
+				case 'g':
+				{
+					//gaussain optimization
+					structure* tempXnew = optimizationGaussian(*Xnew, step, taskName, basis, cmethod, optimizationIterations, charge, state);
+					delete Xnew;
+					Xnew = tempXnew;
+					break;
+				}
+				default:
+				{
+					structure* tempXnew = optimizationGaussian(*Xnew, step, taskName, basis, cmethod, optimizationIterations, charge, state);
+					delete Xnew;
+					Xnew = tempXnew;
+					break;
+				}
+				}
+			}
+			
 			// this is causing a crash because there is no optimize
 			//should we add the optimized structure to structures? check if it already is in structures?
 			/*
 			TODO
 			*/
 			if (DEBUG) std::cout << "calling energy of Xnew " << std::endl;
-			double newEnergy = energyGuassian(*Xnew, energyCall++, taskName, basis, method, charge, state);
+			double newEnergy;
+			switch (calculator)
+			{
+			case 'b':
+				//basin hopping energy
+				newEnergy = basinHoppingEnergy(*Xnew, energyCall++, taskName, a, b, c);
+				break;
+			case 'g':
+				//gaussain energy
+				newEnergy = energyGuassian(*Xnew, energyCall++, taskName, basis, method, charge, state);
+				break;
+			default:
+				newEnergy = energyGuassian(*Xnew, energyCall++, taskName, basis, method, charge, state);
+				break;
+			} 
 			if (DEBUG) std::cout << "Xnew energy: " << newEnergy << std::endl;
 			Xnew->energy = newEnergy;
 			bool accept = false;
@@ -1625,7 +1742,7 @@ void startModifiedBasinHopping(double x, double y, double z,double percentChange
 
 	//add cell size x y z
 	outputString += "Cell size:\n";
-	outputString += std::to_string(x) + " " + std::to_string(y) + " " + std::to_string(z) + "\n";
+	outputString += std::to_string(a) + " " + std::to_string(b) + " " + std::to_string(c) + "\n";
 
 	//rid threshold
 	outputString += "threshold:\n";
@@ -1827,7 +1944,7 @@ std::pair< std::vector<int>, std::vector<std::string>> getComposition(std::strin
 	return std::pair< std::vector<int>, std::vector<std::string>>(composition, elements);
 }
 
-void continueModifiedBasinHopping(std::string startFileName, int charge, int state, std::string method, std::string basis, int optimizationCycles, double percentChangeI, double percentChangeF, int coordinationSteps, int time, int localMinimaTrapping, int radialCriteriaPercent, std::string outputFileName,std::string taskName, double a, double b, double c)
+void continueModifiedBasinHopping(std::string startFileName, int charge, int state, char calculator, std::string method, std::string basis, int optimizationCycles, double percentChangeI, double percentChangeF, int coordinationSteps,int HFsteps, int time, int localMinimaTrapping, int radialCriteriaPercent, std::string outputFileName,std::string taskName, double x, double y, double z)
 {
 	int energyCall = 1;
 	std::ifstream startFile(startFileName);
@@ -1835,9 +1952,9 @@ void continueModifiedBasinHopping(std::string startFileName, int charge, int sta
 
 	double RIDthreshold;
 	std::vector<structure*> structures;
-	double x;
-	double y;
-	double z;
+	double a;
+	double b;
+	double c;
 	std::vector<int> composition;
 	std::vector<std::string> elements;
 	structure* s;
@@ -1863,9 +1980,9 @@ void continueModifiedBasinHopping(std::string startFileName, int charge, int sta
 			else zstart = i;
 		}
 	}
-	x = std::stof(line.substr(xstart, ystart-xstart));
-	y = std::stof(line.substr(ystart, zstart - ystart));
-	z = std::stof(line.substr(zstart, zstart-line.size()));
+	a = std::stof(line.substr(xstart, ystart-xstart));
+	b = std::stof(line.substr(ystart, zstart - ystart));
+	c = std::stof(line.substr(zstart, zstart-line.size()));
 
 	std::getline(startFile, line); //"threshold:\n";
 	std::getline(startFile, line);
@@ -1924,7 +2041,7 @@ void continueModifiedBasinHopping(std::string startFileName, int charge, int sta
 	
 	
 	//double RIDthreshold = threshold(RID, s->composition, x, y, z, 1, 0);
-
+	
 	int step = 0;
 	//int stepsSinceNew = 0;
 	std::vector<std::set<int>> coordinationNumbers = generateAcceptedCoordinationNumbers(previousLocalMinima);
@@ -1934,8 +2051,8 @@ void continueModifiedBasinHopping(std::string startFileName, int charge, int sta
 	auto duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
 	double hours = (double)duration.count() / (double)60;
 
-	//int maxint_ = 0;//remove later!
-	while (hours < double(time) - 0.5/* && 50 > maxint_++*/)
+	int maxint_ = 0;//remove later!
+	while (hours < double(time) - 0.5 && 150 > maxint_++)
 	{
 		if (DEBUG) std::cout << "step: " << step << " time: " << double(time) << std::endl;
 		step += 1;
@@ -1993,9 +2110,24 @@ void continueModifiedBasinHopping(std::string startFileName, int charge, int sta
 				}
 			}
 			*/
-			s = getAcceptedStructure(x, y, z, elements, composition, structures, allLocalMinima, coordinationSteps, coordinationNumbers, radialCriteriaPercent, RIDthreshold);
+			s = getAcceptedStructure(a, b, c, elements, composition, structures, allLocalMinima, coordinationSteps, coordinationNumbers, radialCriteriaPercent, RIDthreshold);
 			// a new seed to start with in s that is unique and passes criteria
-			double seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
+			double seedEnergy;
+			switch (calculator)
+			{
+			case 'b':
+				//basin hopping energy
+				seedEnergy = basinHoppingEnergy(*s, energyCall++, taskName, a, b, c);
+				break;
+			case 'g':
+				//gaussain energy
+				seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
+				break;
+			default:
+				seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
+				break;
+			} 
+			
 			if (DEBUG) std::cout << "new seed found: " << seedEnergy << std::endl;
 			structures.push_back(s);
 			stepsSinceNew = 0;
@@ -2005,12 +2137,28 @@ void continueModifiedBasinHopping(std::string startFileName, int charge, int sta
 
 		if (DEBUG) std::cout << "creating a new structure " << std::endl;
 
-		
+		//old way
 		double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
 		double variationX = x * sigmoidPercentageFromStep / 100;
 		double variationY = y * sigmoidPercentageFromStep / 100;
 		double variationZ = z * sigmoidPercentageFromStep / 100;
-		Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
+
+		//new way
+		std::vector<double> movement;
+		for (int i = 0; i < s->elements.size(); i++)
+		{
+			for (int j = 0; j < s->set[i].size(); j++)
+			{
+				//should this be randomized between -1 to 1?
+
+				movement.push_back( (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x * sigmoidPercentageFromStep / 100);
+				movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y * sigmoidPercentageFromStep / 100);
+				movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z * sigmoidPercentageFromStep / 100);
+
+			}
+		}
+		Xnew = new structure(*s, movement);//new way
+		//Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);//old way
 		//tests
 		//
 		/*
@@ -2049,10 +2197,26 @@ void continueModifiedBasinHopping(std::string startFileName, int charge, int sta
 				}
 				delete Xnew;
 				double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
-				double variationX = x * sigmoidPercentageFromStep / 100;
-				double variationY = y * sigmoidPercentageFromStep / 100;
-				double variationZ = z * sigmoidPercentageFromStep / 100;
-				Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
+
+				std::vector<double> movement;
+				for (int i = 0; i < s->elements.size(); i++)
+				{
+					for (int j = 0; j < s->set[i].size(); j++)
+					{
+						//should this be randomized between -1 to 1?
+
+						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x * sigmoidPercentageFromStep / 100);
+						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y * sigmoidPercentageFromStep / 100);
+						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z * sigmoidPercentageFromStep / 100);
+
+					}
+				}
+				Xnew = new structure(*s, movement);//new way
+
+				//double variationX = x * sigmoidPercentageFromStep / 100;
+				//double variationY = y * sigmoidPercentageFromStep / 100;
+				//double variationZ = z * sigmoidPercentageFromStep / 100;
+				//Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
 			}
 		}
 		else {
@@ -2061,10 +2225,25 @@ void continueModifiedBasinHopping(std::string startFileName, int charge, int sta
 				if (DEBUG) std::cout << "did not pass criteria (radial) " << std::endl;
 				delete Xnew;
 				double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
-				double variationX = x * sigmoidPercentageFromStep / 100;
-				double variationY = y * sigmoidPercentageFromStep / 100;
-				double variationZ = z * sigmoidPercentageFromStep / 100;
-				Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
+
+				std::vector<double> movement;
+				for (int i = 0; i < s->elements.size(); i++)
+				{
+					for (int j = 0; j < s->set[i].size(); j++)
+					{
+						//should this be randomized between -1 to 1?
+
+						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x * sigmoidPercentageFromStep / 100);
+						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y * sigmoidPercentageFromStep / 100);
+						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z * sigmoidPercentageFromStep / 100);
+
+					}
+				}
+				Xnew = new structure(*s, movement);//new way
+				//double variationX = x * sigmoidPercentageFromStep / 100;
+				//double variationY = y * sigmoidPercentageFromStep / 100;
+				//double variationZ = z * sigmoidPercentageFromStep / 100;
+				//Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
 			}
 		}
 
@@ -2097,16 +2276,60 @@ void continueModifiedBasinHopping(std::string startFileName, int charge, int sta
 			*/
 			//optimize Xnew
 			//Xnew = optimize(*Xnew);
-			structure* tempXnew = optimizationGaussian(*Xnew, step, taskName, basis, method, optimizationCycles, charge, state);
-			delete Xnew;
-			Xnew = tempXnew;
+			std::string cmethod = "HF";
+			if (allLocalMinima.size() > HFsteps)
+			{
+				cmethod = cmethod;
+			}
+			if (optimizationCycles > 0) {
+				switch (calculator)
+				{
+				case 'b':
+					//basin hopping energy
+					//no optimization
+					break;
+				case 'g':
+				{
+					//gaussain energy
+					structure* tempXnew = optimizationGaussian(*Xnew, step, taskName, basis, cmethod, optimizationCycles, charge, state);
+					delete Xnew;
+					Xnew = tempXnew;
+					break;
+				}
+				default:
+				{
+					structure* tempXnew = optimizationGaussian(*Xnew, step, taskName, basis, cmethod, optimizationCycles, charge, state);
+					delete Xnew;
+					Xnew = tempXnew;
+					break;
+				}
+				}
+			}
+			//structure* tempXnew = optimizationGaussian(*Xnew, step, taskName, basis, cmethod, optimizationCycles, charge, state);
+			//delete Xnew;
+			//Xnew = tempXnew;
 			// this is causing a crash because there is no optimize
 			//should we add the optimized structure to structures? check if it already is in structures?
 			/*
 			TODO
 			*/
 			if (DEBUG) std::cout << "calling energy of Xnew " << std::endl;
-			double newEnergy = energyGuassian(*Xnew, energyCall++, taskName, basis, method, charge, state); 
+			double newEnergy;
+			//= energyGuassian(*Xnew, energyCall++, taskName, basis, method, charge, state);
+			switch (calculator)
+			{
+			case 'b':
+				//basin hopping energy
+				newEnergy = basinHoppingEnergy(*Xnew, energyCall++, taskName, a, b, c);
+				break;
+			case 'g':
+				//gaussain energy
+				newEnergy = energyGuassian(*Xnew, energyCall++, taskName, basis, method, charge, state);
+				break;
+			default:
+				newEnergy = energyGuassian(*Xnew, energyCall++, taskName, basis, method, charge, state);
+				break;
+			}
 				if (DEBUG) std::cout << "Xnew energy: " << newEnergy << std::endl;
 			Xnew->energy = newEnergy;
 			bool accept = false;
@@ -2191,7 +2414,7 @@ void continueModifiedBasinHopping(std::string startFileName, int charge, int sta
 
 	//add cell size x y z
 	outputString += "Cell size:\n";
-	outputString += std::to_string(x) + " " + std::to_string(y) + " " + std::to_string(z) + "\n";
+	outputString += std::to_string(a) + " " + std::to_string(b) + " " + std::to_string(c) + "\n";
 
 	//rid threshold
 	outputString += "threshold:\n";
@@ -2340,6 +2563,23 @@ structure* optimize(structure& s)
 
 int main(int argv, char *argc[])
 {
+	/*
+	double RIDthreshold = threshold(RID, { 3 }, 2, 2, 2, 1, 0, 0.2, 0.2, 0.2);
+	return 1;
+	std::vector<std::vector<atom>> setS = { std::vector<atom>{atom(0,0,0.205569),atom(0.588472,0.088472,0.5),atom(0.326759,0.461247,0.5)},std::vector<atom>{atom(0.182971 ,	0.682971 ,	0)}};
+	std::vector<std::string> elementsE = {"B","Pr"};
+	structure s = structure(setS,  elementsE);
+	for (int i = 0; i < 100; i++)
+	{
+		if (radialCriteria(s, i)) std::cout << i << " percent passed" << std::endl;
+		else std::cout << i << " percent FAILED" << std::endl;
+	}
+	return 0;
+	*/
+	/*
+	
+	*/
+
 	srand(time(NULL));
 	/*
 	std::vector<int> compositionB = { 3 };
@@ -2377,7 +2617,7 @@ int main(int argv, char *argc[])
 	//*/
 	/*
 	-b basis
-	-m or d method
+	-m  method
 	-l previous file name
 	-f output file
 	-n taskName
@@ -2406,9 +2646,9 @@ int main(int argv, char *argc[])
 	std::vector<int> composition;
 	std::string compositionString;
 	//std::string potential;
-	int radialCriteriaPercent;
-	int percentChangeI;
-	int percentChangeF;
+	double radialCriteriaPercent;
+	double percentChangeI;
+	double percentChangeF;
 	int charge;
 	int state;
 	int optimizationCycles;
@@ -2416,6 +2656,9 @@ int main(int argv, char *argc[])
 	int time;
 	int coordinationSteps;
 	int localMinimaTrappingSteps;
+	int HFsteps;
+	int SCFsteps;
+	char dft;//dft calculator for energy and optimization
 
 	bool continuePastRun = false;
 	double x, y, z;
@@ -2439,7 +2682,7 @@ int main(int argv, char *argc[])
 		{
 			std::cout << "flag out of bounds" << std::endl;
 		}
-		else if(argc[i+1][0] == '-') {
+		else if(argc[i+1][0] == '-' && (std::string)argc[i] != "-charge") {
 			std::cout << "missing argument for: " << argc[i] << std::endl;
 		}
 		else {
@@ -2447,6 +2690,13 @@ int main(int argv, char *argc[])
 			previousFilename = argc[i + 1];
 			if (DEBUG) std::cout << "previous filename: " << previousFilename << std::endl;
 			continuePastRun = true;
+			i++;
+		}
+		else if ((std::string)argc[i] == "-d")
+		{
+			std::string dftS = argc[i + 1];
+			dft = dftS[0];
+			if (DEBUG) std::cout << "dftS: " << dft << std::endl;
 			i++;
 		}
 		else if ((std::string)argc[i] == "-b")
@@ -2479,7 +2729,7 @@ int main(int argv, char *argc[])
 			if (DEBUG) std::cout << std::endl;
 			i++;
 		}
-		else if ((std::string)argc[i] == "-xyz")
+		else if ((std::string)argc[i] == "-xyz" || (std::string)argc[i] == "-XYZ")
 		{
 			x = std::atof(argc[i + 1]);
 			y = std::atof(argc[i + 2]);
@@ -2487,7 +2737,7 @@ int main(int argv, char *argc[])
 			if (DEBUG) std::cout << "xyz: " << x << " " << y << " " << z << std::endl;
 			i += 3;
 		}
-		else if ((std::string)argc[i] == "-abc")
+		else if ((std::string)argc[i] == "-abc" || (std::string)argc[i] == "-ABC")
 		{
 			a = std::atof(argc[i + 1]);
 			b = std::atof(argc[i + 2]);
@@ -2519,6 +2769,18 @@ int main(int argv, char *argc[])
 			if (DEBUG) std::cout << "local minima trapping steps: " << localMinimaTrappingSteps << std::endl;
 			i++;
 		}
+		else if ((std::string)argc[i] == "-stepsH")
+		{
+			HFsteps = std::atoi(argc[i + 1]);
+			if (DEBUG) std::cout << "Hartree fock steps: " << HFsteps << std::endl;
+			i++;
+		}
+		else if ((std::string)argc[i] == "-stepsS")
+		{
+			SCFsteps = std::atoi(argc[i + 1]);
+			if (DEBUG) std::cout << "scf steps: " << SCFsteps << std::endl;
+			i++;
+		}
 		else if ((std::string)argc[i] == "-n")
 		{
 			taskName = argc[i + 1];
@@ -2533,19 +2795,19 @@ int main(int argv, char *argc[])
 		}
 		else if ((std::string)argc[i] == "-pr")
 		{
-			radialCriteriaPercent = std::stoi(argc[i + 1]);
+			radialCriteriaPercent = std::stof(argc[i + 1]);
 			if (DEBUG) std::cout << "radial criteria percent: " << radialCriteriaPercent << std::endl;
 			i++;
 		}
 		else if ((std::string)argc[i] == "-pi")
 		{
-			percentChangeI = std::stoi(argc[i + 1]);
+			percentChangeI = std::stof(argc[i + 1]);
 			if (DEBUG) std::cout << "percent change I: " << percentChangeI << std::endl;
 			i++;
 		}
 		else if ((std::string)argc[i] == "-pf")
 		{
-			percentChangeF = std::stoi(argc[i + 1]);
+			percentChangeF = std::stof(argc[i + 1]);
 			if (DEBUG) std::cout << "percent change F: " << percentChangeF << std::endl;
 			i++;
 		}
@@ -2558,13 +2820,13 @@ int main(int argv, char *argc[])
 		else if ((std::string)argc[i] == "-s")
 		{
 			state = std::atoi(argc[i + 1]);
-			if (DEBUG) std::cout << "state: " << cycles << std::endl;
+			if (DEBUG) std::cout << "state: " << state << std::endl;
 			i++;
 		}
 		else if ((std::string)argc[i] == "-o")
 		{
 		optimizationCycles = std::atoi(argc[i + 1]);
-		if (DEBUG) std::cout << "optimization cycles: " << cycles << std::endl;
+		if (DEBUG) std::cout << "optimization cycles: " << optimizationCycles << std::endl;
 		i++;
 		}
 		else {
@@ -2581,12 +2843,12 @@ int main(int argv, char *argc[])
 	if (continuePastRun)
 	{
 		if (DEBUG) std::cout << "continuing modified basin hopping: " << std::endl;
-		continueModifiedBasinHopping(previousFilename, charge, state, method, basis, optimizationCycles, percentChangeI, percentChangeF, coordinationSteps, time, localMinimaTrappingSteps, radialCriteriaPercent, outputFileName, taskName, a, b, c);
+		continueModifiedBasinHopping(previousFilename, charge, state,dft, method, basis, optimizationCycles, percentChangeI, percentChangeF, coordinationSteps, time, localMinimaTrappingSteps, 0,radialCriteriaPercent, outputFileName, taskName, a, b, c);
 		//continueModifiedBasinHopping(previousFilename, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, coordinationSteps, time, localMinimaTrappingSteps, radialCriteriaPercent,outputFileName, taskName, a, b, c);
 	}
 	else {
 		if (DEBUG) std::cout << "start modified basin hopping: " << std::endl;
-		startModifiedBasinHopping(x, y, z, percentChangeI, percentChangeF, composition, elements, charge, state, method, basis, optimizationCycles, coordinationSteps, time, localMinimaTrappingSteps, radialCriteriaPercent, outputFileName, taskName, a, b, c);
+		startModifiedBasinHopping(x, y, z, percentChangeI, percentChangeF, composition, elements, charge, state,dft, method, basis, optimizationCycles, coordinationSteps, time, localMinimaTrappingSteps, 0,radialCriteriaPercent, outputFileName, taskName, a, b, c);
 		//startModifiedBasinHopping(x, y, z, composition, elements, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, coordinationSteps, time, localMinimaTrappingSteps, radialCriteriaPercent,outputFileName, taskName, a, b, c);
 	}
 

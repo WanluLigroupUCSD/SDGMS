@@ -16,5 +16,5 @@ void scoreAtoms(structure &A);
 double RID(structure& A, structure& B);//rotationally indendent distance
 
 //determine cutoff value for structural similarity heuristic
-double threshold(std::function<double(structure&, structure&)> func, std::vector<int> composition, double rangeX, double rangeY, double rangeZ, double similar, int percent= 0 );
+double threshold(std::function<double(structure&, structure&)> func, std::vector<int> composition, double rangeX, double rangeY, double rangeZ, double similar, double moveX, double moveY, double moveZ, double percent = 0);
 #endif
