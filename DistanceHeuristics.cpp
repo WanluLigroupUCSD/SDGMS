@@ -306,7 +306,7 @@ double RID(structure& A, structure& B)
 }
 
 
-double threshold(std::function<double(structure&, structure&)> heuristic, std::vector<int> composition, double rangeX, double rangeY, double rangeZ, double similar,double moveX, double moveY, double moveZ, double percent)
+double threshold(std::function<double(structure&, structure&)> heuristic, std::vector<int> composition,std::vector<std::string> elements, double rangeX, double rangeY, double rangeZ, double similar,double moveX, double moveY, double moveZ, double percent)
 {
     //we want to differentiate similar structures from structures that are likely to be generated from movements.
 
@@ -316,6 +316,8 @@ double threshold(std::function<double(structure&, structure&)> heuristic, std::v
     //percent is the percentage allowed of different structures to be taken
     //rangeX,y,z are the bounds of the structure
 
+    bool bugging = false;
+
     std::vector<double> heuristicSimilar;
     std::vector<double> heuristicDifferent;
 
@@ -323,7 +325,7 @@ double threshold(std::function<double(structure&, structure&)> heuristic, std::v
 
     for (int i = 0; i < trials; i++)
     {
-        structure A = structure(rangeX, rangeY, rangeZ, composition);
+        structure A = structure(rangeX, rangeY, rangeZ, composition,elements);
         std::vector<double> movementDifferent;
         std::vector<double> movementSimilar;
         int tParameters = 0;
@@ -341,12 +343,10 @@ double threshold(std::function<double(structure&, structure&)> heuristic, std::v
 
             }
         }
-
         if ((i+1) % 1000 == 0) std::cout << i / 100 << "% of trials generated" << std::endl;
         
         structure S = structure(A, movementSimilar);
         structure D = structure(A, movementDifferent);
-
         heuristicSimilar.push_back(heuristic(A, S));
         heuristicDifferent.push_back(heuristic(A, D));
     }

@@ -9,10 +9,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <fstream>
 #include <stdlib.h>
 
-const int DEBUG = 1;
+const int DEBUG = 0;
+const int STDOUT = 1;
 
 double temperature(int step,int averageSteps,double eVLimit)
 {
@@ -28,7 +28,7 @@ double temperature(int step,int averageSteps,double eVLimit)
 	step: current step
 	*/
 	//determine the equation:
-	double halfValue = std::log(0.5);
+	double halfValue = -std::log(0.5);
 	double temp = eVLimit / (halfValue * boltzman);
 	double base = std::pow(temp, 1.0 / averageSteps);
 	return 0.8 + std::pow(base, step);
@@ -640,7 +640,8 @@ H   0.441  -0.143   0.0
 	*/
 	//route section
 	std::string outString = "# " + method + "/" + basis_name;
-	if(maxCycles > 0) outString += " Opt=(MaxCycles=" + std::to_string(maxCycles) + ") SCF=(MaxCycle=" + std::to_string(maxSCF) + ")";
+	if(maxCycles > 0) outString += " Opt=(MaxCycles=" + std::to_string(maxCycles) + ")";
+	if (maxSCF > 0) outString += " SCF = (MaxCycle = " + std::to_string(maxSCF) + ")";
 	outString += "\n\n";
 	//title section
 	outString += task + "\n\n";
@@ -662,6 +663,829 @@ H   0.441  -0.143   0.0
 
 
 }
+void writeToADF(structure& s, std::string task, std::string filename, std::string basis_name, std::string method,int maxSCF = 300, int charge = 0, int state = 1, std::string converge = "1.0e-6")
+{
+
+	//task is either GeometryOptimization or Energy??
+	std::string out = "#!/bin/sh\n\n\"$AMSBIN/ams\" << eor\n\n";
+	out += "Task " + task + "\n";
+	out += "System\n";
+	out += "\tCharge " + std::to_string(charge) + "\n";
+	out += "\tAtoms";
+
+
+	for (int e = 0; e < s.set.size(); e++)
+	{
+		for (int atom = 0; atom < s.set[e].size(); atom++)
+		{
+			out += "\n\t\t" + s.elements[e];
+			if (s.set[e][atom].x > 0) out += "  " + std::to_string(s.set[e][atom].x).substr(0, 7);
+			else out += " " + std::to_string(s.set[e][atom].x).substr(0, 8);
+			if (s.set[e][atom].y > 0) out += "  " + std::to_string(s.set[e][atom].y).substr(0, 7);
+			else out += " " + std::to_string(s.set[e][atom].y).substr(0, 8);
+			if (s.set[e][atom].z > 0) out += "  " + std::to_string(s.set[e][atom].z).substr(0, 7);
+			else out += " " + std::to_string(s.set[e][atom].z).substr(0, 8);
+		}
+	}
+	out += "\n\tEnd\nEnd\n";
+	/*
+	if (task == "GeometryOptimization")
+	{
+		out += "GeometryOptimization\n";
+		out += "\toptim all\n";
+		out += "\titerations 300\n";
+		out += "\tstep rad=0.15 angle=10.0\n";
+		out += "\thessupd BFGS\n";
+		out += "\tConvergence Gradient=1.0e-4\n";
+		out += "\tConvergence e=1.0e-4 grad=1.0e-4 rad=1.0e-2 angle=0.5\n";
+		out += "End\n";
+		out += "\t\n";
+		out += "SCF\n";
+		out += "\titerations 300\n";
+		out += "\tconverge 1.0e-6 1.0e-6\n";
+		out += "\tmixing 0.2\n";
+		out += "\tlshift 0.0\n";
+		out += "\tDIIS\n\t\tn 500\n\t\tok 0.00001\n\t\tcyc 500\n\tEnd\n";// cx = 5.0 cxx = 10.0\n";
+		out += "END\n";
+	}*/
+
+	//Engine block
+	out += "Engine ADF\n";//should be ADF
+	out += "\tUnrestricted Yes\n";
+	out += "\tspinpolarization " + std::to_string(state) + "\n";
+	out += "\tBasis\n\t\tType " + basis_name + "\n\t\tCore Large\n";
+	out += "\tEnd\n";
+	out += "\trelativity\n";
+	out += "\t\tlevel scalar\n";
+	out += "\t\tformalism ZORA\n";
+	out += "\tEnd\n";
+	out += "\tSCF\n";
+	out += "\t\titerations " + std::to_string(maxSCF) + "\n";
+	out += "\t\tconverge " + converge + " " + converge + "\n";
+	out += "\t\tmixing 0.2\n";
+	out += "\t\tlshift 0.0\n";
+	out += "\t\tdiis\n\t\t\tn 500\n\t\t\tok 0.00001\n\t\t\tcyc 500\n\t\tEnd\n";// cx = 5.0 cxx = 10.0\n";
+	out += "\tEND\n";
+
+	out += "\txc\n";
+	out += "\t\tgga " + method + "\n";
+	out += "\tEnd\n";
+	out += "EndEngine\n";
+	out += "eor";
+	std::ofstream file(filename + ".run");
+	file << out;
+	file.close();
+
+
+
+}
+
+structure* optimizationADF(structure& s, std::string filename, std::string basis_name, std::string method, int charge, int state, std::string AMSHOME,int amscalculation = -1,int maxSCF = 300,std::string converge="1.0e-6", double timeoutminutes = -1, double timeLeftMinutes = -1, bool keepFiles = false)
+{
+	
+	if (amscalculation != -1)
+	{
+		//we are going to make separate folders for each ams
+
+	}
+	else
+	{
+		char* ac;
+		std::string deleteFiles1 = "rm -r ams.results\n";
+		std::string deleteFiles2 = "rm " + filename + ".run\n";
+		std::string deleteFiles3 = "rm " + filename + ".out\n";
+
+		ac = new char[deleteFiles1.length() + 1];
+		for (int i = 0; i < deleteFiles1.length(); i++)
+		{
+			ac[i] = deleteFiles1[i];
+		}
+		std::cout << "command: " << ac << std::endl;
+		std::system(ac);
+		delete[] ac;
+
+
+		ac = new char[deleteFiles2.length() + 1];
+		for (int i = 0; i < deleteFiles2.length(); i++)
+		{
+			ac[i] = deleteFiles2[i];
+		}
+		std::system(ac);
+		std::cout << "command: " << ac << std::endl;
+		delete[] ac;
+
+		ac = new char[deleteFiles3.length() + 1];
+		for (int i = 0; i < deleteFiles3.length(); i++)
+		{
+			ac[i] = deleteFiles3[i];
+		}
+		std::system(ac);
+		std::cout << "command: " << ac << std::endl;
+		delete[] ac;
+
+	}
+	/*
+	
+	*/
+	std::string dirname = "calc" + std::to_string(amscalculation);
+	char* ac;
+	if (amscalculation != -1) {
+		std::string mkdir = "mkdir " + dirname + "\ncd " + dirname + "\n";
+
+		ac = new char[mkdir.length() + 1];
+		for (int i = 0; i < mkdir.length(); i++)
+		{
+			ac[i] = mkdir[i];
+		}
+		std::cout << "command: " << ac << std::endl;
+		std::system(ac);
+		delete[] ac;
+	}
+
+	writeToADF(s, "GeometryOptimization", dirname + "/" + filename, basis_name, method,maxSCF, charge, state,converge);
+	
+	std::string checker;
+	std::ifstream* adfInput = new std::ifstream(dirname + "/" + filename + ".run");
+
+	while (!getline(*adfInput, checker))
+	{
+		adfInput->close();
+		delete adfInput;
+		adfInput = new std::ifstream(dirname + "/" + filename + ".run");
+	}
+	adfInput->close();
+	delete adfInput;
+
+	std::cout << "input file written" << std::endl;
+
+	std::string commands = "";
+	//commands += "export AMSHOME=" + AMSHOME + "\n";//AMSHOME = /home/jpburkhardt/scm/ams2023.104
+	//commands += "export AMSBIN=$AMSHOME/bin\nexport AMSRESOURCES=$AMSHOME/atomicdata\nexport SCMLICENSE=$AMSHOME/license.txt\n";
+	//commands += "AMS_CALCULATION=" + filename + "\n" + "dos2unix $AMS_CALCULATION.run\n" + "chmod u+x $AMS_CALCULATION.run\n";
+	//commands += "./$AMS_CALCULATION.run > " + filename + ".out\n";
+	commands += "cd " + dirname + "\n";
+	commands += "dos2unix " + filename + ".run\n" + "chmod u+x " + filename + ".run\n";
+	commands += "nohup ./" + filename + ".run > " + filename + ".out &\n";
+
+	//"cd \"\"" + cp2kpath + "\"\"\nstartcp2k -i testingCH4_1_929_in.txt -o " + outFileName + ".txt";
+		//std::string cp2kcommand = "cd \"\"" + cp2kpath + "\"\"\nstartcp2k -i " + inFileName + ".txt -o " + outFileName + ".txt\n";
+	std::cout << "printing input" << std::endl;
+
+
+	ac = new char[commands.length() + 1];
+	for (int i = 0; i < commands.length(); i++)
+	{
+		ac[i] = commands[i];
+	}
+	ac[commands.length()] = '\0';
+	std::cout << "commands: " << ac << std::endl;
+
+	std::cout << "writing command" << std::endl;
+	std::cout << "commands: " << ac << std::endl;
+	time_t start = time(0);
+	std::system(ac);
+	delete[] ac;
+
+
+	//reading file input
+	std::ifstream* aOutFile = new std::ifstream(dirname + "/" + filename + ".out");
+
+
+	//stall for cp2k to finish
+	std::cout << "checking for guassian completion" << std::endl;
+
+
+
+	while (!getline(*aOutFile, checker))
+	{
+		aOutFile->close();
+		delete aOutFile;
+		aOutFile = new std::ifstream(dirname + "/" + filename + ".out");
+	}
+	std::cout << "ADF started" << std::endl;
+
+	//the file is writing complete?
+	bool finishedOutput_energy = false;
+	bool finishedOutput_geometry = false;
+	std::vector<std::string> optStrings = {};
+	std::string outLine;
+	std::string energyString;
+
+
+
+
+	while (!finishedOutput_energy || !finishedOutput_geometry)
+	{
+		if (timeLeftMinutes != -1)
+		{
+			
+			auto seconds_since_start = difftime(time(0), start);
+			if (seconds_since_start > timeLeftMinutes*60 - 5*60)
+			{
+				//kill the task so we dont waste cpu resource
+				commands = "pkill ams\n";
+				ac = new char[commands.length() + 1];
+				for (int i = 0; i < commands.length(); i++)
+				{
+					ac[i] = commands[i];
+				}
+				ac[commands.length()] = '\0';
+				std::cout << "commands: " << ac << std::endl;
+				std::cout << "writing command" << std::endl;
+				time_t start = time(0);
+				std::system(ac);
+				delete[] ac;
+				return nullptr;
+
+			}
+
+		}
+		if (timeoutminutes != -1)
+		{
+
+			auto seconds_since_start = difftime(time(0), start);
+			if (seconds_since_start > timeoutminutes * 60)
+			{
+				commands = "pkill ams\n";
+				ac = new char[commands.length() + 1];
+				for (int i = 0; i < commands.length(); i++)
+				{
+					ac[i] = commands[i];
+				}
+				ac[commands.length()] = '\0';
+				std::cout << "commands: " << ac << std::endl;
+				std::cout << "writing command" << std::endl;
+				time_t start = time(0);
+				std::system(ac);
+				delete[] ac;
+				return nullptr;
+			}
+
+		}
+
+		optStrings = {};
+		//reopen file to get new updates
+		aOutFile->close();
+		delete aOutFile;
+		aOutFile = new std::ifstream(dirname + "/" + filename + ".out");
+
+		//look for the energy line
+		
+		while (getline(*aOutFile, outLine)) {
+			
+			//if getline is included in the while statement conditional then energy line will advance after the loop closes and point to the wrong line
+
+			std::string match = "Energy (hartree)";
+			std::string match2 = "Optimized geometry:";
+			std::string match3 = "Geometry optimization failed";
+			std::string match4 = "BAD CORE INTEGRAL";
+			std::string match5 = "Process received SIGTERM";
+			if (outLine.size() >= match.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < match.size(); m++)
+				{
+					if (outLine[m] != match[m]) matching = false;
+				}
+				if (matching) {
+					finishedOutput_energy = true;//cannot be made false
+					energyString = outLine;
+				}
+			}
+
+			bool getopt = false;
+
+			if (outLine.size() >= match2.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < match2.size(); m++)
+				{
+					if (outLine[m] != match2[m]) matching = false;
+				}
+				if (matching) {
+					getopt = true;//cannot be made false
+					finishedOutput_geometry = true;//geometry needs its own bool now because there are cases where energy calculates but geometry does not and crash line geometry optimization failed hasnt been printed yet
+				}
+			}
+			if (getopt)
+			{
+				bool stop = false;
+				for (int i = 0; i < 7; i++) if (!stop) if (!getline(*aOutFile, outLine)) stop = true;
+				for (int e = 0; e < s.elements.size(); e++)  for (int a = 0; a < s.set[e].size(); a++) {
+					if(!stop) if (!getline(*aOutFile, outLine)) stop = true;
+					optStrings.push_back(outLine);
+				}
+			}
+			//when the AMS calculation is successful, energy is always printed after the geometry, and therefore its fine to get the geometry here.
+
+			bool failed = false;
+			if (outLine.size() >= match3.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < match3.size(); m++)
+				{
+					if (outLine[m] != match3[m]) matching = false;
+				}
+				if (matching) failed = true;//cannot be made false
+			}
+			if (outLine.size() >= match4.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < match4.size(); m++)
+				{
+					if (outLine[m] != match4[m]) matching = false;
+				}
+				if (matching) failed = true;//cannot be made false
+			}
+			if (outLine.size() >= match5.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < match5.size(); m++)
+				{
+					if (outLine[m] != match5[m]) matching = false;
+				}
+				if (matching) failed = true;//cannot be made false
+			}
+			if (failed)
+			{
+				return nullptr;
+			}
+		}
+
+		
+
+	}
+	std::cout << "finished output: " << finishedOutput_energy << std::endl;
+
+
+
+	double seconds_since_start = difftime(time(0), start);
+
+	std::string getout = "cd ../\n";
+	if (amscalculation != -1) {
+		ac = new char[getout.length() + 1];
+		for (int i = 0; i < getout.length(); i++)
+		{
+			ac[i] = getout[i];
+		}
+
+		std::system(ac);
+		std::cout << "command: " << getout << std::endl;
+		delete[] ac;
+	}
+	std::cout << "ADF time: " << seconds_since_start << std::endl;
+	
+	structure* st = nullptr;
+
+	
+
+	std::vector<std::string> elements = {};
+	std::vector<std::vector<atom>> set = {};
+
+	for (int i = 0; i < optStrings.size(); i++)
+	{
+		std::cout << optStrings[i] << std::endl;
+
+		std::string cline = optStrings[i];
+
+		std::string element = "";
+		if (cline[12] == ' ') element = cline.substr(13, 1);//it goes the other way ....
+		else element = cline.substr(12, 2);
+		//x
+		double x;
+		double y;
+		double z;
+		bool sign = false;
+		if (cline[18] == '-') sign = true;
+		if (sign) x = std::stod(cline.substr(18, 11));
+		else x = std::stod(cline.substr(19, 10));
+		if (cline[33] == '-') sign = true;
+		else sign = false;
+		if (sign) y = std::stod(cline.substr(33, 11));
+		else y = std::stod(cline.substr(34, 10));
+		if (cline[48] == '-') sign = true;
+		else sign = false;
+		if (sign) z = std::stod(cline.substr(48, 11));
+		else z = std::stod(cline.substr(49, 10));
+
+		
+
+		//figure out which set this belongs to.
+		int index = -1;
+		for (int i = 0; i < elements.size(); i++)
+		{
+			if (elements[i] == element)
+			{
+				index = i;
+			}
+		}
+		//if (buggo) std::cout << "making atom for elemental index " << index << " with coords " << x << " " << y << " " << z << std::endl;
+		if (index == -1)
+		{
+			//if (buggo) std::cout << "not yet indexed" << std::endl;
+			//atom type not yet indexed
+			elements.push_back(element);
+			std::vector < atom> alist = { atom(x,y,z) };
+			set.push_back(alist);
+		}
+		else {
+			//if (buggo) std::cout << "pushing back" << std::endl;
+			set[index].push_back(atom(x, y, z));
+		}
+	}
+				//if (buggo) std::cout << "this structure is not the last one starting over with next" << std::endl;
+
+	if (st != nullptr) delete st;
+	st = new structure(set, elements);
+
+	
+	std::cout << "found energy" << std::endl;
+	std::string matchString = "Energy (hartree)";
+	std::string num = "";
+	for (int i = matchString.length(); i < energyString.length(); i++)
+	{
+		if (energyString[i] != ' ') num += energyString[i];
+	}
+	double energy = std::stod(num);
+	st->energy = energy;
+	// Close the file
+	//if there was no convergence then nullptr will be returned
+	//if (buggo) std::cout << "closing" << std::endl;
+	aOutFile->close();
+	delete aOutFile;
+
+
+	//remove files
+	if (!keepFiles)
+	{
+		if (amscalculation == -1)
+		{
+
+			std::string deleteFiles1 = "rm -r ams.results\n";
+			std::string deleteFiles2 = "rm " + filename + ".run\n";
+			std::string deleteFiles3 = "rm " + filename + ".out\n";
+
+			ac = new char[deleteFiles1.length() + 1];
+			for (int i = 0; i < deleteFiles1.length(); i++)
+			{
+				ac[i] = deleteFiles1[i];
+			}
+			std::cout << "command: " << ac << std::endl;
+			std::system(ac);
+			delete[] ac;
+
+
+			ac = new char[deleteFiles2.length() + 1];
+			for (int i = 0; i < deleteFiles2.length(); i++)
+			{
+				ac[i] = deleteFiles2[i];
+			}
+			std::system(ac);
+			std::cout << "command: " << ac << std::endl;
+			delete[] ac;
+
+			ac = new char[deleteFiles3.length() + 1];
+			for (int i = 0; i < deleteFiles3.length(); i++)
+			{
+				ac[i] = deleteFiles3[i];
+			}
+			std::system(ac);
+			std::cout << "command: " << ac << std::endl;
+			delete[] ac;
+		}
+		else {
+			std::string deleteFiles1 = "rm -r " + dirname + "\n";
+			ac = new char[deleteFiles1.length() + 1];
+			for (int i = 0; i < deleteFiles1.length(); i++)
+			{
+				ac[i] = deleteFiles1[i];
+			}
+			std::cout << "command: " << ac << std::endl;
+			std::system(ac);
+			delete[] ac;
+
+		}
+
+	}
+	
+	return st;
+	//return energyHartree;
+}
+
+double energyADF(structure& s, std::string filename, std::string basis_name, std::string method, int charge, int state, std::string AMSHOME,int adfcalculation = -1,std::string converge = "1.0e-6",int timeoutminutes = -1,int timeLeftMinutes = -1, bool keepFiles = false)
+{
+	if (adfcalculation == -1)//always delete with ams, make sure its gone to prevent crashes
+	{
+		char* ac;
+		std::string deleteFiles1 = "rm -r ams.results\n";
+		std::string deleteFiles2 = "rm " + filename + ".run\n";
+		std::string deleteFiles3 = "rm " + filename + ".out\n";
+
+		ac = new char[deleteFiles1.length() + 1];
+		for (int i = 0; i < deleteFiles1.length(); i++)
+		{
+			ac[i] = deleteFiles1[i];
+		}
+		std::cout << "command: " << ac << std::endl;
+		std::system(ac);
+		delete[] ac;
+
+
+		ac = new char[deleteFiles2.length() + 1];
+		for (int i = 0; i < deleteFiles2.length(); i++)
+		{
+			ac[i] = deleteFiles2[i];
+		}
+		std::system(ac);
+		std::cout << "command: " << ac << std::endl;
+		delete[] ac;
+
+		ac = new char[deleteFiles3.length() + 1];
+		for (int i = 0; i < deleteFiles3.length(); i++)
+		{
+			ac[i] = deleteFiles3[i];
+		}
+		std::system(ac);
+		std::cout << "command: " << ac << std::endl;
+		delete[] ac;
+
+	}
+	std::string dirname = "calc" + std::to_string(adfcalculation);
+	char* ac;
+	if (adfcalculation != -1) {
+		std::string mkdir = "mkdir " + dirname + "\n";//cd " + dirname + "\n";
+
+		ac = new char[mkdir.length() + 1];
+		for (int i = 0; i < mkdir.length(); i++)
+		{
+			ac[i] = mkdir[i];
+		}
+		std::cout << "command: " << ac << std::endl;
+		std::system(ac);
+		delete[] ac;
+
+	}
+
+	writeToADF(s, "SinglePoint", dirname + "/" + filename, basis_name, method,300, charge, state,converge);
+
+	std::string checker;
+	std::ifstream* adfInput = new std::ifstream(dirname + "/" + filename + ".run");
+
+	while (!getline(*adfInput, checker))
+	{
+		adfInput->close();
+		delete adfInput;
+		adfInput = new std::ifstream(dirname + "/" + filename + ".run");
+	}
+	adfInput->close();
+	delete adfInput;
+
+	std::cout << "input file written" << std::endl;
+
+	std::string commands = "";
+	//commands += "export AMSHOME=" + AMSHOME + "\n";//AMSHOME = /home/jpburkhardt/scm/ams2023.104
+	//commands += "export AMSBIN=$AMSHOME/bin\nexport AMSRESOURCES=$AMSHOME/atomicdata\nexport SCMLICENSE=$AMSHOME/license.txt\n";
+	//commands += "AMS_CALCULATION=" + filename + "\n";
+	commands += "cd " + dirname + "\n";
+	commands += "dos2unix " + filename + ".run\n" + "chmod u+x " + filename + ".run\n";
+	commands += "nohup ./" + filename + ".run > " + filename + ".out &\n";
+
+	//"cd \"\"" + cp2kpath + "\"\"\nstartcp2k -i testingCH4_1_929_in.txt -o " + outFileName + ".txt";
+		//std::string cp2kcommand = "cd \"\"" + cp2kpath + "\"\"\nstartcp2k -i " + inFileName + ".txt -o " + outFileName + ".txt\n";
+	std::cout << "printing input" << std::endl;
+
+	ac = new char[commands.length() + 1];
+	for (int i = 0; i < commands.length(); i++)
+	{
+		ac[i] = commands[i];
+	}
+	ac[commands.length()] = '\0';
+	std::cout << "commands: " << ac << std::endl;
+
+	std::cout << "writing command" << std::endl;
+	std::cout << "commands: " << ac << std::endl;
+	time_t start = time(0);
+	std::system(ac);
+	delete[] ac;
+
+
+	//reading file input
+	std::ifstream* aOutFile = new std::ifstream(dirname + "/" + filename + ".out");
+
+
+	//stall for cp2k to finish
+	std::cout << "checking for adf completion" << std::endl;
+
+
+
+
+	while (!getline(*aOutFile, checker))
+	{
+		aOutFile->close();
+		delete aOutFile;
+		aOutFile = new std::ifstream(dirname + "/" + filename + ".out");
+	}
+	std::cout << "ADF started" << std::endl;
+
+	//the file is writing complete?
+	bool finishedOutput = false;
+	std::string outLine;
+	std::string energyString;
+	while (!finishedOutput)
+	{
+		if (timeLeftMinutes != -1)
+		{
+
+			auto seconds_since_start = difftime(time(0), start);
+			if (seconds_since_start > timeLeftMinutes * 60 - 5 * 60)
+			{
+				//kill the task so we dont waste cpu resource
+				commands = "pkill ams\n";
+				ac = new char[commands.length() + 1];
+				for (int i = 0; i < commands.length(); i++)
+				{
+					ac[i] = commands[i];
+				}
+				ac[commands.length()] = '\0';
+				std::cout << "commands: " << ac << std::endl;
+				std::cout << "writing command" << std::endl;
+				time_t start = time(0);
+				std::system(ac);
+				delete[] ac;
+				return DBL_MAX;
+
+			}
+
+		}
+		if (timeoutminutes != -1)
+		{
+
+			auto seconds_since_start = difftime(time(0), start);
+			if (seconds_since_start > timeoutminutes * 60)
+			{
+				commands = "pkill ams\n";
+				ac = new char[commands.length() + 1];
+				for (int i = 0; i < commands.length(); i++)
+				{
+					ac[i] = commands[i];
+				}
+				ac[commands.length()] = '\0';
+				std::cout << "commands: " << ac << std::endl;
+				std::cout << "writing command" << std::endl;
+				time_t start = time(0);
+				std::system(ac);
+				delete[] ac;
+				return DBL_MAX;
+			}
+
+		}
+
+
+		//reopen file to get new updates
+		aOutFile->close();
+		delete aOutFile;
+		aOutFile = new std::ifstream(dirname + "/" + filename + ".out");
+
+		//look for the energy line
+
+		while (getline(*aOutFile, outLine)) {
+			//come back here plz
+			//if getline is included in the while statement conditional then energy line will advance after the loop closes and point to the wrong line
+
+			std::string match = "Energy (hartree)";
+			std::string match4 = "BAD CORE INTEGRAL";
+			std::string match5 = "Process received SIGTERM";
+			if (outLine.size() >= match.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < match.size(); m++)
+				{
+					if (outLine[m] != match[m]) matching = false;
+				}
+				if (matching) {
+					finishedOutput = true;//cannot be made false
+					energyString = outLine;
+				}
+			}
+			bool failed = false;
+			if (outLine.size() >= match4.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < match4.size(); m++)
+				{
+					if (outLine[m] != match4[m]) matching = false;
+				}
+				if (matching) failed = true;//cannot be made false
+			}
+			if (outLine.size() >= match5.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < match5.size(); m++)
+				{
+					if (outLine[m] != match5[m]) matching = false;
+				}
+				if (matching) failed = true;//cannot be made false
+			}
+			if (failed)
+			{
+				return DBL_MAX;
+			}
+		}
+
+
+
+	}
+	std::cout << "finished output: " << finishedOutput << std::endl;
+
+
+	double seconds_since_start = difftime(time(0), start);
+	if (adfcalculation != -1) {
+		std::string getout = "cd ../\n";
+
+		ac = new char[getout.length() + 1];
+		for (int i = 0; i < getout.length(); i++)
+		{
+			ac[i] = getout[i];
+		}
+		std::cout << "command: " << ac << std::endl;
+		std::system(ac);
+		delete[] ac;
+	}
+	std::cout << "ADF time: " << seconds_since_start << std::endl;
+
+
+	std::cout << "found energy" << std::endl;
+	std::string matchString = "Energy (hartree)";
+	std::string num = "";
+	for (int i = matchString.length(); i < energyString.length(); i++)
+	{
+		if (energyString[i] != ' ') num += energyString[i];
+	}
+	double energy = std::stod(num);
+	// Close the file
+	//if there was no convergence then nullptr will be returned
+	//if (buggo) std::cout << "closing" << std::endl;
+	aOutFile->close();
+	delete aOutFile;
+
+
+	//remove files
+	if (!keepFiles)
+	{
+		if (adfcalculation == -1)
+		{
+
+			std::string deleteFiles1 = "rm -r ams.results\n";
+			std::string deleteFiles2 = "rm " + filename + ".run\n";
+			std::string deleteFiles3 = "rm " + filename + ".out\n";
+
+			ac = new char[deleteFiles1.length() + 1];
+			for (int i = 0; i < deleteFiles1.length(); i++)
+			{
+				ac[i] = deleteFiles1[i];
+			}
+			std::cout << "command: " << ac << std::endl;
+			std::system(ac);
+			delete[] ac;
+
+
+			ac = new char[deleteFiles2.length() + 1];
+			for (int i = 0; i < deleteFiles2.length(); i++)
+			{
+				ac[i] = deleteFiles2[i];
+			}
+			std::system(ac);
+			std::cout << "command: " << ac << std::endl;
+			delete[] ac;
+
+			ac = new char[deleteFiles3.length() + 1];
+			for (int i = 0; i < deleteFiles3.length(); i++)
+			{
+				ac[i] = deleteFiles3[i];
+			}
+			std::system(ac);
+			std::cout << "command: " << ac << std::endl;
+			delete[] ac;
+		}
+		else {
+			std::string deleteFiles1 = "rm -r " + dirname + "\n";
+			ac = new char[deleteFiles1.length() + 1];
+			for (int i = 0; i < deleteFiles1.length(); i++)
+			{
+				ac[i] = deleteFiles1[i];
+			}
+			std::cout << "command: " << ac << std::endl;
+			std::system(ac);
+			delete[] ac;
+
+		}
+
+	}
+
+	return energy;
+	//return energyHartree;
+}
+
 double basinHoppingEnergy(structure& s, int ittt, std::string task, double a, double b, double c)
 {
 	if (DEBUG > 1)
@@ -755,14 +1579,61 @@ double basinHoppingEnergy(structure& s, int ittt, std::string task, double a, do
 			if (DEBUG) std::cout << "here 1" << std::endl;
 		}
 		if (DEBUG) std::cout << "outer loop complete" << std::endl;
-	}
+	}startModifiedBasinHopping(init, x, y, z, percentChangeI, percentChangeF, composition, elements, charge, state, dft, method, basis, optimizationCycles, coordinationSteps, HFsteps, time, localMinimaTrappingSteps, radialCriteriaPercent, outputFileName, taskName, a, b, c, blindGradientDescent, directionExponent, proportionExponent, deltaEThr);
+			
 	*/
 	if (DEBUG > 1) std::cout << "returning" << std::endl;
 	return 0.5 * epsilon * energy;
 };
 
+structure* optimizationBasinHopping(structure& s, int ittt, std::string task, int maxCycles, double x, double y, double z)
+{
+	//perform max cylces random steps
+	std::vector<double> movementVector = {};
+	double lowestEnergy = s.energy;
+	structure * st = nullptr;
+	for (int i = 0; i < s.elements.size(); i++)
+	{
+		for (int j = 0; j < s.set[i].size(); j++)
+		{
+			movementVector.push_back(((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x));
+			movementVector.push_back(((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y));
+			movementVector.push_back(((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z));
+		}
+
+	}
+	for (int i = 0; i < maxCycles; i++)
+	{
+		for (int i = 0; i < s.elements.size(); i++)
+		{
+			for (int j = 0; j < s.set[i].size(); j++)
+			{
+				movementVector[i*3] = (((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1)* x));
+				movementVector[i*3 + 1] = (((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y));
+				movementVector[i*3 + 2] = (((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z));
+			}
+
+		}
+		structure* sn = nullptr;
+		if(st != nullptr) sn = new structure(*st, movementVector);
+		else sn = new structure(s, movementVector);
+		double snergy = basinHoppingEnergy(*sn, 0, "task", x, y, z);
+		sn->energy = snergy;
+		if (snergy < lowestEnergy)
+		{
+			if(st != nullptr) delete st;
+			st = sn;
+			lowestEnergy = snergy;
+		}
+	}
+	return st;
+}
+
+
+
 double energyCP2K(structure& s, int ittt, std::string task, double a, double b, double c)
 {
+
 	//these a b c are for cell shape
 	std::string fileName = task + "_" + std::to_string(ittt) + "_" + std::to_string(rand() / 10);
 	std::string inFileName = fileName + "_in.txt";
@@ -873,7 +1744,7 @@ double energyCP2K(structure& s, int ittt, std::string task, double a, double b, 
 }
 
 
-double energyGuassian(structure& s, int ittt, std::string task,std::string basis,std::string method,int charge = 0, int state = 0)
+double energyGuassian(structure& s, int ittt, std::string task,std::string basis,std::string method,int charge = 0, int state = 0, int maxSCF = 129,bool keepFiles = false)
 {
 	//outfile name should end in log, not sure what the input should end in
 
@@ -884,7 +1755,7 @@ double energyGuassian(structure& s, int ittt, std::string task,std::string basis
 	std::string inFileName = fileName + ".com";
 	std::string outFileName = fileName + ".log";
 
-	writeToGuassian(s, guassianTaskName, inFileName, basis, method,charge,state);
+	writeToGuassian(s, guassianTaskName, inFileName, basis, method,charge,state,0,maxSCF);
 
 	//ensure file has been written
 	std::string checker;
@@ -903,7 +1774,7 @@ double energyGuassian(structure& s, int ittt, std::string task,std::string basis
 	std::string guassiancommand = "g16 <" + inFileName + " >" + outFileName;
 
 	//"cd \"\"" + cp2kpath + "\"\"\nstartcp2k -i testingCH4_1_929_in.txt -o " + outFileName + ".txt";
-		//std::string cp2kcommand = "cd \"\"" + cp2kpath + "\"\"\nstartcp2k -i " + inFileName + ".txt -o " + outFileName + ".txt\n";
+	//std::string cp2kcommand = "cd \"\"" + cp2kpath + "\"\"\nstartcp2k -i " + inFileName + ".txt -o " + outFileName + ".txt\n";
 	std::cout << "printing input" << std::endl;
 
 	char* gc = new char[guassiancommand.length() + 1];
@@ -918,6 +1789,7 @@ double energyGuassian(structure& s, int ittt, std::string task,std::string basis
 	std::cout << "command: " << gc << std::endl;
 	time_t start = time(0);
 	std::system(gc);
+	delete[]gc;
 	//std::cout << "command written" << std::endl;
 
 	std::ifstream* gOutFile = new std::ifstream(outFileName);
@@ -936,9 +1808,10 @@ double energyGuassian(structure& s, int ittt, std::string task,std::string basis
 	}
 	std::cout << "guassian started" << std::endl;
 	//the file is located but energy may not be calculated yet
-	bool energyCalculated = false;
-	std::string energyLine;
-	while (!energyCalculated)
+	bool finishedOutput = false;
+
+	std::string outLine;
+	while (!finishedOutput)
 	{
 		//reopen file to get new updates
 		gOutFile->close();
@@ -946,31 +1819,59 @@ double energyGuassian(structure& s, int ittt, std::string task,std::string basis
 		gOutFile = new std::ifstream(outFileName);
 
 		//look for the energy line
-		while (!energyCalculated) {
+		while (getline(*gOutFile, outLine)) {
 			//if getline is included in the while statement conditional then energy line will advance after the loop closes and point to the wrong line
-			if (getline(*gOutFile, energyLine))
+
+			std::string match = " Job cpu time:";
+
+			if (outLine.size() > match.size())
 			{
-				std::string match = " SCF Done:  E";
-
-				if (energyLine.size() > match.size())
+				bool matching = true;
+				for (int m = 0; m < match.size(); m++)
 				{
-					bool matching = true;
-					for (int m = 0; m < match.size(); m++)
-					{
-						if (energyLine[m] != match[m]) matching = false;
-					}
-					energyCalculated = matching;
+					if (outLine[m] != match[m]) matching = false;
 				}
+				if (matching) finishedOutput = true;//cannot be made false
 			}
-			else {
-				break;
-			}
-			
 		}
-	}
 
+	}
 	double seconds_since_start = difftime(time(0), start);
 	std::cout << "gaussian time: " << seconds_since_start << std::endl;
+
+	std::string energyLine;
+	int lastLines = 0;
+	int clines = 0;
+	//reopen file to get new updates
+	gOutFile->close();
+	delete gOutFile;
+	gOutFile = new std::ifstream(outFileName);
+	bool energyCalculated = false;
+		//look for the energy line
+	while (!energyCalculated) {
+			//if getline is included in the while statement conditional then energy line will advance after the loop closes and point to the wrong line
+		if (getline(*gOutFile, energyLine))
+		{
+			std::string match = " SCF Done:  E";
+
+			if (energyLine.size() > match.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < match.size(); m++)
+				{
+					if (energyLine[m] != match[m]) matching = false;
+				}
+				energyCalculated = matching;
+			}
+		}
+		else {
+			break;
+		}
+			
+	}
+	if (!energyCalculated) return DBL_MAX;//this might mess with gradient descent
+
+	
 	std::cout << "reading file" << std::endl;
 
 	//find the start of the energy
@@ -1003,10 +1904,49 @@ double energyGuassian(structure& s, int ittt, std::string task,std::string basis
 	gOutFile->close();
 	delete gOutFile;
 	std::cout << "energy: " << energyHartree << std::endl;
+
+	//remove files
+	if (!keepFiles)
+	{
+
+		std::string deleteFiles1 = "rm " + inFileName + "\n";
+		std::string deleteFiles2 = "rm " + outFileName + "\n";
+		std::string deleteFiles3 = "rm -r core.*\n";
+
+		gc = new char[deleteFiles1.length() + 1];
+		for (int i = 0; i < deleteFiles1.length(); i++)
+		{
+			gc[i] = deleteFiles1[i];
+		}
+		std::cout << "command: " << gc << std::endl;
+		std::system(gc);
+		delete[] gc;
+
+
+		gc = new char[deleteFiles2.length() + 1];
+		for (int i = 0; i < deleteFiles2.length(); i++)
+		{
+			gc[i] = deleteFiles2[i];
+		}
+		std::system(gc);
+		std::cout << "command: " << gc << std::endl;
+		delete[] gc;
+
+		gc = new char[deleteFiles3.length() + 1];
+		for (int i = 0; i < deleteFiles3.length(); i++)
+		{
+			gc[i] = deleteFiles3[i];
+		}
+		std::system(gc);
+		std::cout << "command: " << gc << std::endl;
+		delete[] gc;
+
+	}
+
 	return energyHartree;
 }
 
-structure* optimizationGaussian(structure& s, int ittt, std::string task, std::string basis, std::string method, int maxCycles, int charge = 0, int state = 0, int maxSCF = 129)
+structure* optimizationGaussian(structure& s, int ittt, std::string task, std::string basis, std::string method, int maxCycles, int charge = 0, int state = 0, int maxSCF = 129, bool keepFiles = false)
 {
 	//the method should be HF instead of DFT for better convergence
 	//outfile name should end in log, not sure what the input should end in
@@ -1052,6 +1992,7 @@ structure* optimizationGaussian(structure& s, int ittt, std::string task, std::s
 	std::cout << "command: " << gc << std::endl;
 	time_t start = time(0);
 	std::system(gc);
+	delete[] gc;
 	//std::cout << "command written" << std::endl;
 
 	std::ifstream* gOutFile = new std::ifstream(outFileName);
@@ -1117,6 +2058,15 @@ structure* optimizationGaussian(structure& s, int ittt, std::string task, std::s
 	//bool buggo = true;
 	//if (buggo) std::cout << "opening line one" << std::endl;
 	std::string matchString = "Input orientation:";
+	std::string eMatch = " SCF Done:  E";
+	std::string energyLine = "";
+
+
+
+	std::cout << "reading file" << std::endl;
+
+	//find the start of the energy
+	
 	while (getline(*gOutFile, cline)) {
 		//if (buggo) std::cout << "line one opened" << std::endl;
 		if (cline.length() > matchString.length())
@@ -1219,7 +2169,7 @@ structure* optimizationGaussian(structure& s, int ittt, std::string task, std::s
 
 						}
 						else {
-							std::cout << "adding " << std::to_string(cline[i]) << " or " << cline[i] << "? to cnumber" << std::endl;
+							//std::cout << "adding " << std::to_string(cline[i]) << " or " << cline[i] << "? to cnumber" << std::endl;
 							cnumber += cline[i];
 						}
 					}
@@ -1256,6 +2206,15 @@ structure* optimizationGaussian(structure& s, int ittt, std::string task, std::s
 			//else if (buggo) std::cout << "no match" << std::endl;
 
 		}
+		if (cline.size() > eMatch.size())
+		{
+			bool matching = true;
+			for (int m = 0; m < eMatch.size(); m++)
+			{
+				if (cline[m] != eMatch[m]) matching = false;
+			}
+			if (matching) energyLine = cline;
+		}
 			//structure(std::vector<std::vector<atom>> set, std::vector<std::string> elements, bool sort = false)
 		
 	}
@@ -1264,10 +2223,690 @@ structure* optimizationGaussian(structure& s, int ittt, std::string task, std::s
 	//if (buggo) std::cout << "closing" << std::endl;
 	gOutFile->close();
 	delete gOutFile;
+	////
+	int eStart = 0;
+	int eFin = 0;
+	bool equalPassed = false;
+	for (int i = 0; i < energyLine.size(); i++)
+	{
+		if (eFin) {}
+		else if (eStart) {
+			if (energyLine[i] == ' ')
+			{
+				eFin = i;
+			}
+		}
+		else if (equalPassed) {
+			if (energyLine[i] == ' ') {}
+			else eStart = i;
+		}
+		else if (energyLine[i] == '=') equalPassed = true;
+
+	}
+	//if(DEBUG > 1) std::cout << energyLine.substr(eStart, eFin - eStart) << std::endl;
+	double energyHartree = std::stod(energyLine.substr(eStart, eFin - eStart));
+	st->energy = energyHartree;
+	/////
+	//remove files
+	if (!keepFiles)
+	{
+
+		std::string deleteFiles1 = "rm " + inFileName + "\n";
+		std::string deleteFiles2 = "rm "+ outFileName + "\n";
+		std::string deleteFiles3 = "rm -r core.*\n";
+
+		gc = new char[deleteFiles1.length() + 1];
+		for (int i = 0; i < deleteFiles1.length(); i++)
+		{
+			gc[i] = deleteFiles1[i];
+		}
+		std::cout << "command: " << gc << std::endl;
+		std::system(gc);
+		delete[] gc;
+
+
+		gc = new char[deleteFiles2.length() + 1];
+		for (int i = 0; i < deleteFiles2.length(); i++)
+		{
+			gc[i] = deleteFiles2[i];
+		}
+		std::system(gc);
+		std::cout << "command: " << gc << std::endl;
+		delete[] gc;
+
+		gc = new char[deleteFiles3.length() + 1];
+		for (int i = 0; i < deleteFiles3.length(); i++)
+		{
+			gc[i] = deleteFiles3[i];
+		}
+		std::system(gc);
+		std::cout << "command: " << gc << std::endl;
+		delete[] gc;
+		
+	}
+
 	return st;
-	//return energyHartree;
 }
 
+structure* newOptimizationGaussian(structure& s, std::string filename, std::string basis_name, std::string method, int charge, int state, int amscalculation = -1, int maxSCF = 300,int maxCycles = 100, double timeoutminutes = -1, double timeLeftMinutes = -1, bool keepFiles = false)
+{
+	std::string dirname = "calc" + std::to_string(amscalculation);
+	char* ac;
+	if (amscalculation != -1) {
+		std::string mkdir = "mkdir " + dirname + "\ncd " + dirname + "\n";
+
+		ac = new char[mkdir.length() + 1];
+		for (int i = 0; i < mkdir.length(); i++)
+		{
+			ac[i] = mkdir[i];
+		}
+		std::cout << "command: " << ac << std::endl;
+		std::system(ac);
+		delete[] ac;
+	}
+
+	std::string guassianTaskName = filename + " opt";
+
+	std::string inFileName =  filename + ".com";
+	std::string outFileName =  filename + ".log";
+
+	writeToGuassian(s, guassianTaskName, dirname + "/" + inFileName, basis_name, method, charge, state, maxCycles, maxSCF);
+
+	std::string checker;
+	std::ifstream* adfInput = new std::ifstream(dirname + "/" + inFileName);
+
+	while (!getline(*adfInput, checker))
+	{
+		adfInput->close();
+		delete adfInput;
+		adfInput = new std::ifstream(dirname + "/" + inFileName);
+	}
+	adfInput->close();
+	delete adfInput;
+
+	std::cout << "input file written" << std::endl;
+
+	std::string commands = "";
+	commands += "cd " + dirname + "\n";
+	commands += "dos2unix " + inFileName + "\n";
+	commands += "nohup g16 <" + inFileName + " >" + outFileName + " &\n";
+	std::cout << "printing input" << std::endl;
+
+
+	ac = new char[commands.length() + 1];
+	for (int i = 0; i < commands.length(); i++)
+	{
+		ac[i] = commands[i];
+	}
+	ac[commands.length()] = '\0';
+	std::cout << "commands: " << ac << std::endl;
+
+	std::cout << "writing command" << std::endl;
+	std::cout << "commands: " << ac << std::endl;
+	time_t start = time(0);
+	std::system(ac);
+	delete[] ac;
+
+	std::ifstream* aOutFile = new std::ifstream(dirname + "/" + outFileName);
+
+
+	std::cout << "checking for gaussian completion" << std::endl;
+
+
+
+	while (!getline(*aOutFile, checker))
+	{
+		aOutFile->close();
+		delete aOutFile;
+		aOutFile = new std::ifstream(dirname + "/" + outFileName);
+	}
+	std::cout << "Gaussian started" << std::endl;
+
+	bool finishedOutput = false;
+	bool finishedEnergy = false;
+	bool finishedStructure = false;
+	std::vector<std::string> optStrings = {};
+	std::string outLine;
+	std::string energyString;
+
+
+
+	
+	while (!finishedOutput || !finishedEnergy || !finishedStructure)
+	{
+		if (finishedOutput && !(finishedEnergy && finishedStructure))
+		{
+				commands = "pkill g16\n";
+				ac = new char[commands.length() + 1];
+				for (int i = 0; i < commands.length(); i++)
+				{
+					ac[i] = commands[i];
+				}
+				ac[commands.length()] = '\0';
+				std::cout << "commands: " << ac << std::endl;
+				std::cout << "writing command" << std::endl;
+				std::system(ac);
+				delete[] ac;
+				return nullptr;
+
+		}
+		if (timeLeftMinutes != -1)
+		{
+
+			auto seconds_since_start = difftime(time(0), start);
+			if (seconds_since_start > timeLeftMinutes * 60 - 5 * 60)
+			{
+				commands = "pkill g16\n";
+				ac = new char[commands.length() + 1];
+				for (int i = 0; i < commands.length(); i++)
+				{
+					ac[i] = commands[i];
+				}
+				ac[commands.length()] = '\0';
+				std::cout << "commands: " << ac << std::endl;
+				std::cout << "writing command" << std::endl;
+				time_t start = time(0);
+				std::system(ac);
+				delete[] ac;
+				return nullptr;
+
+			}
+
+		}
+		if (timeoutminutes != -1)
+		{
+
+			auto seconds_since_start = difftime(time(0), start);
+			if (seconds_since_start > timeoutminutes * 60)
+			{
+				commands = "pkill g16\n";
+				ac = new char[commands.length() + 1];
+				for (int i = 0; i < commands.length(); i++)
+				{
+					ac[i] = commands[i];
+				}
+				ac[commands.length()] = '\0';
+				std::cout << "commands: " << ac << std::endl;
+				std::cout << "writing command" << std::endl;
+				time_t start = time(0);
+				std::system(ac);
+				delete[] ac;
+				return nullptr;
+			}
+
+		}
+
+		optStrings = {};
+		aOutFile->close();
+		delete aOutFile;
+		aOutFile = new std::ifstream(dirname + "/" + outFileName);
+
+		std::string match = " Job cpu time:";
+		std::string matchString = "Input orientation:";
+		std::string eMatch = " SCF Done:  E";
+		while (getline(*aOutFile, outLine)) {
+			if (outLine.size() > match.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < match.size(); m++)
+				{
+					if (outLine[m] != match[m]) matching = false;
+				}
+				if (matching) finishedOutput = true;//cannot be made false
+			}
+			if (outLine.size() > matchString.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < matchString.size(); m++)
+				{
+					if (outLine[m] != matchString[m]) matching = false;
+				}
+				if (matching) finishedStructure = true;//cannot be made false
+			}
+			if (outLine.size() > eMatch.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < eMatch.size(); m++)
+				{
+					if (outLine[m] != eMatch[m]) matching = false;
+				}
+				if (matching) finishedEnergy = true;//cannot be made false
+			}
+		}
+
+		
+		
+		
+
+	}
+	std::cout << "finished output: " << finishedOutput << std::endl;
+	double seconds_since_start = difftime(time(0), start);
+
+
+	aOutFile->close();
+	delete aOutFile;
+	std::ifstream* gOutFile = new std::ifstream(dirname + "/" + outFileName);
+	std::string cline;
+	structure* st = nullptr;
+
+	std::string matchString = "Input orientation:";
+	std::string eMatch = " SCF Done:  E";
+	std::string energyLine = "";
+
+	std::cout << "reading file" << std::endl;
+
+	while (getline(*gOutFile, cline)) {
+		if (cline.length() > matchString.length())
+		{
+
+			bool matching = false;
+			int matchIt = 0;
+			for (int l = 0; l < cline.length() - matchString.length(); l++)
+			{
+				if (cline[l] == matchString[matchIt])
+				{
+					matchIt++;
+					matching = true;
+				}
+				else if (matchIt < 18) {
+					matchIt = 0;
+					matching = false;
+				}
+				else {
+					//the strings are already matched let the match go through
+				}
+			}
+			if (matching) std::cout << "matching ends check length: " << matchIt << " " << matchString.length() << std::endl;
+			if (matching && matchIt >= matchString.length())
+			{
+				std::vector<std::vector<atom>> set;
+				std::vector<std::string> elements;
+				getline(*gOutFile, cline);
+				getline(*gOutFile, cline);
+				getline(*gOutFile, cline);
+				getline(*gOutFile, cline);
+				char space = ' ';
+				while (getline(*gOutFile, cline) && cline[1] != '-')
+				{
+					std::string cnumber = "";
+					int num = 0;
+					std::string element;
+					double x = 0;
+					double y = 0;
+					double z = 0;
+					for (int i = 0; i < cline.length(); i++)
+					{
+						if (cline[i] == space)
+						{
+							if (cnumber.length() > 0)
+							{
+								num++;
+								switch (num)
+								{
+								case 1:
+									//center number, not sure what this is for. do nothing
+									break;
+								case 2:
+									//atomic number
+									element = atomicNumber(std::stoi(cnumber));
+									break;
+								case 3:
+									//atomic type, not sure what this is. do nothing.
+									break;
+								case 4:
+									//x coordinate
+									x = std::stof(cnumber);
+									break;
+								case 5:
+									//y
+									y = std::stof(cnumber);
+									break;
+								case 6:
+									//z
+									z = std::stof(cnumber);
+									break;
+								default:
+									break;
+
+								}
+								cnumber = "";
+							}
+						}
+						else {
+							cnumber += cline[i];
+						}
+					}
+					int index = -1;
+					for (int i = 0; i < elements.size(); i++)
+					{
+						if (elements[i] == element)
+						{
+							index = i;
+						}
+					}
+					if (index == -1)
+					{
+						elements.push_back(element);
+						std::vector < atom> alist = { atom(x,y,z) };
+						set.push_back(alist);
+					}
+					else {
+						set[index].push_back(atom(x, y, z));
+					}
+				}
+				if (st != nullptr) delete st;
+				st = new structure(set, elements);
+
+
+			}
+		}
+		if (cline.size() > eMatch.size())
+		{
+			bool matching = true;
+			for (int m = 0; m < eMatch.size(); m++)
+			{
+				if (cline[m] != eMatch[m]) matching = false;
+			}
+			if (matching) energyLine = cline;
+		}
+	}
+	gOutFile->close();
+	delete gOutFile;
+
+	//find the start of the energy
+	int eStart = 0;
+	int eFin = 0;
+	bool equalPassed = false;
+	for (int i = 0; i < energyLine.size(); i++)
+	{
+		if (eFin) {}
+		else if (eStart) {
+			if (energyLine[i] == ' ')
+			{
+				eFin = i;
+			}
+		}
+		else if (equalPassed) {
+			if (energyLine[i] == ' ') {}
+			else eStart = i;
+		}
+		else if (energyLine[i] == '=') equalPassed = true;
+
+	}
+	//if(DEBUG > 1) std::cout << energyLine.substr(eStart, eFin - eStart) << std::endl;
+	double energyHartree = std::stod(energyLine.substr(eStart, eFin - eStart));
+	st->energy = energyHartree;
+
+	std::cout << "Gaussian time: " << seconds_since_start << std::endl;
+	if (!keepFiles)
+	{
+
+		std::string deleteFiles1 = "rm -r " + dirname + "\n";
+
+		ac = new char[deleteFiles1.length() + 1];
+		for (int i = 0; i < deleteFiles1.length(); i++)
+		{
+			ac[i] = deleteFiles1[i];
+		}
+		std::cout << "command: " << ac << std::endl;
+		std::system(ac);
+		delete[] ac;
+
+
+	}
+	return st;
+}
+double newEnergyGaussian(structure& s, std::string filename, std::string basis_name, std::string method, int charge, int state, int amscalculation = -1, int maxSCF = 300, int maxCycles = 100, double timeoutminutes = -1, double timeLeftMinutes = -1, bool keepFiles = false)
+{
+	std::string dirname = "calc" + std::to_string(amscalculation);
+	char* ac;
+	if (amscalculation != -1) {
+		std::string mkdir = "mkdir " + dirname + "\ncd " + dirname + "\n";
+
+		ac = new char[mkdir.length() + 1];
+		for (int i = 0; i < mkdir.length(); i++)
+		{
+			ac[i] = mkdir[i];
+		}
+		std::cout << "command: " << ac << std::endl;
+		std::system(ac);
+		delete[] ac;
+	}
+
+	std::string guassianTaskName = filename + " energy";
+
+	std::string inFileName = filename + ".com";
+	std::string outFileName = filename + ".log";
+
+	writeToGuassian(s, guassianTaskName, dirname + "/" + inFileName, basis_name, method, charge, state,0, maxSCF);
+
+	std::string checker;
+	std::ifstream* adfInput = new std::ifstream(dirname + "/" + inFileName);
+
+	while (!getline(*adfInput, checker))
+	{
+		adfInput->close();
+		delete adfInput;
+		adfInput = new std::ifstream(dirname + "/" + inFileName);
+	}
+	adfInput->close();
+	delete adfInput;
+
+	std::cout << "input file written" << std::endl;
+
+	std::string commands = "";
+	commands += "cd " + dirname + "\n";
+	commands += "dos2unix " + inFileName + "\n";
+	commands += "nohup g16 <" + inFileName + " >" + outFileName + " &\n";
+	std::cout << "printing input" << std::endl;
+
+
+	ac = new char[commands.length() + 1];
+	for (int i = 0; i < commands.length(); i++)
+	{
+		ac[i] = commands[i];
+	}
+	ac[commands.length()] = '\0';
+	std::cout << "commands: " << ac << std::endl;
+
+	std::cout << "writing command" << std::endl;
+	std::cout << "commands: " << ac << std::endl;
+	time_t start = time(0);
+	std::system(ac);
+	delete[] ac;
+
+	std::ifstream* aOutFile = new std::ifstream(dirname + "/" + outFileName);
+
+
+	std::cout << "checking for gaussian completion" << std::endl;
+
+
+
+	while (!getline(*aOutFile, checker))
+	{
+		aOutFile->close();
+		delete aOutFile;
+		aOutFile = new std::ifstream(dirname + "/" + outFileName);
+	}
+	std::cout << "Gaussian started" << std::endl;
+
+	bool finishedOutput = false;
+	bool finishedEnergy = false;
+	std::vector<std::string> optStrings = {};
+	std::string outLine;
+	std::string energyString;
+
+
+
+	std::string energyLine = "";
+	while (!finishedOutput || !finishedEnergy)
+	{
+		if (finishedOutput && !(finishedEnergy))
+		{
+
+				commands = "pkill g16\n";
+				ac = new char[commands.length() + 1];
+				for (int i = 0; i < commands.length(); i++)
+				{
+					ac[i] = commands[i];
+				}
+				ac[commands.length()] = '\0';
+				std::cout << "commands: " << ac << std::endl;
+				std::cout << "writing command" << std::endl;
+				std::system(ac);
+				delete[] ac;
+				return DBL_MAX;
+
+		}
+		if (timeLeftMinutes != -1)
+		{
+
+			auto seconds_since_start = difftime(time(0), start);
+			if (seconds_since_start > timeLeftMinutes * 60 - 5 * 60)
+			{
+				commands = "pkill g16\n";
+				ac = new char[commands.length() + 1];
+				for (int i = 0; i < commands.length(); i++)
+				{
+					ac[i] = commands[i];
+				}
+				ac[commands.length()] = '\0';
+				std::cout << "commands: " << ac << std::endl;
+				std::cout << "writing command" << std::endl;
+				time_t start = time(0);
+				std::system(ac);
+				delete[] ac;
+				return DBL_MAX;
+
+			}
+
+		}
+		if (timeoutminutes != -1)
+		{
+
+			auto seconds_since_start = difftime(time(0), start);
+			if (seconds_since_start > timeoutminutes * 60)
+			{
+				commands = "pkill g16\n";
+				ac = new char[commands.length() + 1];
+				for (int i = 0; i < commands.length(); i++)
+				{
+					ac[i] = commands[i];
+				}
+				ac[commands.length()] = '\0';
+				std::cout << "commands: " << ac << std::endl;
+				std::cout << "writing command" << std::endl;
+				time_t start = time(0);
+				std::system(ac);
+				delete[] ac;
+				return DBL_MAX;
+			}
+
+		}
+
+		optStrings = {};
+		aOutFile->close();
+		delete aOutFile;
+		aOutFile = new std::ifstream(dirname + "/" + outFileName);
+
+		std::string match = " Job cpu time:";
+		std::string eMatch = " SCF Done:  E";
+		while (getline(*aOutFile, outLine)) {
+			if (outLine.size() > match.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < match.size(); m++)
+				{
+					if (outLine[m] != match[m]) matching = false;
+				}
+				if (matching) finishedOutput = true;//cannot be made false
+				else {
+					//std::cout << match << "\n vs \n" << outLine << std::endl;
+				}
+			}
+			if (outLine.size() > eMatch.size())
+			{
+				bool matching = true;
+				for (int m = 0; m < eMatch.size(); m++)
+				{
+					if (outLine[m] != eMatch[m]) matching = false;
+				}
+				if (matching) {
+					finishedEnergy = true;//cannot be made false
+					energyLine = outLine;
+				}
+			}
+		}
+
+
+	}
+	std::cout << "finished output: " << finishedOutput << std::endl;
+	double seconds_since_start = difftime(time(0), start);
+
+
+	aOutFile->close();
+	delete aOutFile;
+	
+	//find the start of the energy
+	int eStart = 0;
+	int eFin = 0;
+	bool equalPassed = false;
+	for (int i = 0; i < energyLine.size(); i++)
+	{
+		if (eFin) {}
+		else if (eStart) {
+			if (energyLine[i] == ' ')
+			{
+				eFin = i;
+			}
+		}
+		else if (equalPassed) {
+			if (energyLine[i] == ' ') {}
+			else eStart = i;
+		}
+		else if (energyLine[i] == '=') equalPassed = true;
+
+	}
+	//if(DEBUG > 1) std::cout << energyLine.substr(eStart, eFin - eStart) << std::endl;
+	double energyHartree = std::stod(energyLine.substr(eStart, eFin - eStart));
+
+	std::cout << "Gaussian time: " << seconds_since_start << std::endl;
+	if (!keepFiles)
+	{
+
+		std::string deleteFiles1 = "rm -r " + dirname + "\n";
+
+		ac = new char[deleteFiles1.length() + 1];
+		for (int i = 0; i < deleteFiles1.length(); i++)
+		{
+			ac[i] = deleteFiles1[i];
+		}
+		std::cout << "command: " << ac << std::endl;
+		std::system(ac);
+		delete[] ac;
+
+
+	}
+	return energyHartree;
+}
+
+
+std::vector<double> direction(structure& a, structure& b)
+{
+	//returns the direction between two structures
+	std::vector<double> dir;
+	for (int i = 0; i < a.elements.size(); i++)
+	{
+		for (int j = 0; j < a.set[i].size(); j++)
+		{
+			dir.push_back(b.set[i][j].x - a.set[i][j].x);
+			dir.push_back(b.set[i][j].y - a.set[i][j].y);
+			dir.push_back(b.set[i][j].z - a.set[i][j].z);
+		}
+	}
+
+	return dir;
+}
 
 structure* getAcceptedStructure(double x, double y, double z, std::vector<std::string> elements, std::vector<int> composition, std::vector<structure*>& structures, std::vector<structure*>& localMinima, int coordinationSteps, std::vector<std::set<int>>& coordinationNumbers, int radialCriteriaPercent, double RIDthreshold )
 {
@@ -1297,7 +2936,7 @@ else std::cout << " coordination numbers" << std::endl;
 		else {
 			while (!radialCriteria(*retValue, radialCriteriaPercent))
 			{
-				if (DEBUG) std::cout << "did not pass criteria (radial) " << std::endl;
+				if (DEBUG) std::cout << "did not pass criteria (radial) in seed creation" << std::endl;
 				delete retValue;
 				retValue = new structure(x, y, z, composition, elements);
 			}
@@ -1325,7 +2964,7 @@ else std::cout << " coordination numbers" << std::endl;
 			//delete s here because we know we arent accepting it and we cant delete it at the top of the loop
 		}
 		else {
-			if (DEBUG) std::cout << "structure accepted" << std::endl;
+			if (DEBUG) std::cout << "seed structure accepted" << std::endl;
 		}
 
 		
@@ -1336,535 +2975,136 @@ else std::cout << " coordination numbers" << std::endl;
 	return retValue;
 }
 
-void startModifiedBasinHopping(double x, double y, double z,double percentChangeI, double percentChangeF, std::vector<int> composition, std::vector<std::string> elements,int charge, int state, char calculator, std::string method, std::string basis,int optimizationIterations,int coordinationSteps,int HFsteps, int time, int localMinimaTrapping,int radialCriteriaPercent, std::string outputFileName, std::string taskName,double a, double b, double c)
+void createSeeds()
 {
-	std::vector<structure*> structures = { };
-	std::vector<structure*> localMinima = {};
-	std::vector<std::set<int>> coordinationNumbers;
-	double RIDthreshold = threshold(RID,composition, a, b, c, 1, 0,x,y,z);
-	structure* s = getAcceptedStructure(a, b, c, elements, composition, structures,localMinima, coordinationSteps, coordinationNumbers, radialCriteriaPercent, RIDthreshold);
+	//this function will use symmetry to create seeds
+
+}
+
+double proportion(double energy,double eThr)
+{
+	/*
+	TODO, should be a sigmoid function
+	*/
+	//double eThr = 0;
+	//eThr is the threshold for energy change that should be considered a complete movement
+	//ranges from 1 to -1 based on x
+	//the change in energy is negative if good, but we want this scalar to always be positive, and eThr/e normalization input is positive.
+	//therefore
+	double eScalar = 0;
+	if (energy > 0)	eScalar = energy / eThr;
+	else eScalar = -energy / eThr;
+
+	/*
+	MAJOR CHANGE to fix an error hopefully
+
+	if the change in energy is negative this is good so we want the proportion to be positive.
+	if the change in energy is positive this is bad so we want the proportion to be negative.
+
+	*/
+	eScalar = -energy / eThr;
+	//a negative sign was placed here as well infront of escalar
+	double sigmoid = 2 / (1 + exp((-eScalar)*2*exp(1))) - 1;
+	
+	return sigmoid;
+}
+
+
+std::pair<structure*,std::vector<double>> createXnew(structure* s, double percentChangeI, double percentChangeF, int step, double x, double y, double z, std::vector<double>& directionVector, bool blindGradient = false, int exponent1 = 0, int exponent2 = 0,  double deltaE = 0,double eThr = 1, int hybridSteps = 0, int ccSteps = 1)
+{
+	//direction vector must be size s.natoms*3 
+	std::vector<double> newDirVector = {};
 	
 
-		//new structure(x, y, z, composition, elements);
-	int energyCall = 1;
-
-	double seedEnergy;
-	switch (calculator)
+	if (blindGradient && ccSteps >= hybridSteps)
 	{
-	case 'b':
-		//basin hopping energy
-		seedEnergy = basinHoppingEnergy(*s, energyCall++, taskName, a, b, c);
-		break;
-	case 'g':
-		//gaussain energy
-		seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
-		break;
-	default:
-		seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
-		break;
-	} 
+		//new blind gradient descent method
 
-	if(DEBUG) std::cout << "seed structure energy: " << seedEnergy << std::endl;
-	//check it passes radial criteria?
-	s->energy = seedEnergy;
+		/*
+		Negative last step: (previous direction)*(proportionality scalar) + abs(previous direction)*(random vector 1 to -1)*(proportionality scalar)^n
+		Positive last step: (previous direction)*(proportionality scalar) + abs(previous direction)*(random vector 1 to -1)*(1 - proportionality scalar)^n
+		*/
+		double p = proportion(deltaE,eThr);
+		//if (DEBUG) std::cout << "VECTORS: before and after vectors with proportion: " << p << " from deltaE: " << deltaE << std::endl;
+		//if (DEBUG) for (int i = 0; i < directionVector.size(); i++) std::cout << directionVector[i] << " ";
+		//if(DEBUG) std::cout << std::endl;
 
-	structures.push_back(s);
-	structure* lastLocalMinima = nullptr;
-	
-	if (DEBUG) std::cout << "RID threshold: " << RIDthreshold << std::endl;
+		/*
+				With the MAJOR CHANGE in proportion, in the case of positive energy in the past it was ok for (1-p) to be positive as the signs would randomly change anyways, but now we want it to be 1+p as p should be negative
+				in proportion now in this case p is negative so we want for the previous 1-p term to be negativ
+		*/
 
-	int step = 0;
-	int stepsSinceNew = 0;
-
-	
-
-	auto start = std::chrono::high_resolution_clock::now();
-	auto stop = std::chrono::high_resolution_clock::now();
-	auto duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
-	double hours = (double)duration.count() / (double)60;
-	if (DEBUG) std::cout << "chours:  " << hours << " ; time limit: " << double(time) - 0.5 <<  std::endl;
-	int maxint_ = 0;//remove later!
-	while (hours < double(time) - 0.5 && 100 > maxint_++)
-	{
-		if (DEBUG) std::cout << "step: " << step << " time: " << double(time) << std::endl;
-		step += 1;
-		structure* Xnew = nullptr;
-
-		//to avoid local minima trapping, if for a while a new structure cant be accepted then move to a new one
-		if (stepsSinceNew > localMinimaTrapping)
+		/*//old way
+		if (deltaE > 0)
 		{
-			if (DEBUG) std::cout << "steps since new passed "  << std::endl;
-			//should we restart the step size here for the purpose of deviation from seed?
-			step = 1;
-			//to avoid local minima trapping find a new (unique) seed
-			
-			bool seedAccepted = false;
-			if (DEBUG) std::cout << "looking for a new seed "  << std::endl;
-			/*
-			while (!seedAccepted)
+			for (int i = 0; i < directionVector.size(); i++)
 			{
-				//cant delete s because it might still be the last good structure
-				//delete s;
-				s = new structure(x, y, z, composition, elements);
-				std::vector<structure*>::iterator it = structures.begin();
-
-				if (localMinima.size() >= coordinationSteps)
-				{
-					while (!coordinationNumber(*s,coordinationNumbers) || !radialCriteria(*s,radialCriteriaPercent))
-					{
-						delete s;
-						s = new structure(x, y, z, composition, elements);
-					}
-				}
-				else {
-					while (!radialCriteria(*s,radialCriteriaPercent))
-					{
-						delete s;
-						s = new structure(x, y, z, composition, elements);
-					}
-				}
-				bool unique = true;
-
-				while (it != structures.end() && unique)
-				{
-					double dist = RID(*s, *(*it));
-					if (dist < RIDthreshold)
-					{
-						unique = false;
-					}
-					it++;
-				}
-				seedAccepted = unique;
-				if (!seedAccepted)
-				{
-					delete s;
-					//delete s here because we know we arent accepting it and we cant delete it at the top of the loop
-				}
+				
+				if (directionVector[i] > 0) newDirVector.push_back(directionVector[i] * p + pow(directionVector[i], exponent1) * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * pow((1-p), exponent2));
+				else newDirVector.push_back(directionVector[i] * p + pow(-directionVector[i], exponent1) * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * pow((1 - p), exponent2));
 			}
-			*/
-			s = getAcceptedStructure(a, b, c, elements, composition, structures, localMinima, coordinationSteps, coordinationNumbers, radialCriteriaPercent, RIDthreshold);
-			// a new seed to start with in s that is unique and passes criteria
-			double seedEnergy;
-			//= energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
-			switch (calculator)
-			{
-			case 'b':
-				//basin hopping energy
-				seedEnergy = basinHoppingEnergy(*s, energyCall++, taskName, a, b, c);
-				break;
-			case 'g':
-				//gaussain energy
-				seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
-				break;
-			default:
-				seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
-				break;
-			}
-			if (DEBUG) std::cout << "new seed found: " << seedEnergy << std::endl;
-			structures.push_back(s);
-			stepsSinceNew = 0;
 		}
-		//std::cout << "remove later, doing a completely random structure" << std::endl;
-		//energy(structure(*s, step), energyCall++, taskName, a, b, c);
+		else {
+			for (int i = 0; i < directionVector.size(); i++)
+			{
+				if (directionVector[i] > 0) newDirVector.push_back( directionVector[i] * p + pow(directionVector[i], exponent1) * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * pow((p), exponent2));
+				else newDirVector.push_back( directionVector[i] * p + pow(-directionVector[i], exponent1) * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * pow((p), exponent2));
+			}
+		}
+		*/
 
+		if (deltaE > 0)
+		{
+			for (int i = 0; i < directionVector.size(); i++)
+			{
+				newDirVector.push_back(directionVector[i] * p + pow(directionVector[i], exponent1) * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * pow((1 + p), exponent2));
+			}
+		}
+		else {
+			for (int i = 0; i < directionVector.size(); i++)
+			{
+				newDirVector.push_back(directionVector[i] * p + pow(directionVector[i], exponent1) * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * pow((p), exponent2));
+			}
+		}
+		//if (DEBUG) for (int i = 0; i < directionVector.size(); i++) std::cout << directionVector[i] << " ";
+		//if (DEBUG) std::cout << std::endl;
 		
-
-		if (DEBUG) std::cout << "creating a new structure " << std::endl;
-
-		//determine variation based on step
-		double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
-		double variationX = x* sigmoidPercentageFromStep /100;
-		double variationY = y * sigmoidPercentageFromStep / 100;
-		double variationZ = z * sigmoidPercentageFromStep / 100;
+	}
+	else {
+		//old basin hopping method
 		//create the movement vector
 		//get number of atoms first
 		//movement parameters are based on sigmoid variation from step on x,y,z maximum change.
 		//maybe later this should be changed to based the slope of the gradient which can be determiend from the proportion of change in energy to last movement.
-		std::vector<double> movement;
+		//std::vector<double> movement;
+		double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
+
+
 		for (int i = 0; i < s->elements.size(); i++)
 		{
 			for (int j = 0; j < s->set[i].size(); j++)
 			{
 				//should this be randomized between -1 to 1?
 				//x, y , z are the maximum movement, defining those parameters.
-				movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x * sigmoidPercentageFromStep / 100);
-				movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y * sigmoidPercentageFromStep / 100);
-				movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z * sigmoidPercentageFromStep / 100);
-
+				//movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x * sigmoidPercentageFromStep / 100);
+				//movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y * sigmoidPercentageFromStep / 100);
+				//movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z * sigmoidPercentageFromStep / 100);
+				newDirVector.push_back(((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x * sigmoidPercentageFromStep / 100));
+				newDirVector.push_back(((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y * sigmoidPercentageFromStep / 100));
+				newDirVector.push_back(((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z * sigmoidPercentageFromStep / 100));
 			}
-		}
-		Xnew = new structure(*s, movement);//new way
-		//Xnew = new structure(*s, variationX, variationY, variationZ, a,b,c);
-		//tests
-		/*
-		//std::cout << "calculating energy right now!" << std::endl;
-		energy(*Xnew, energyCall++, taskName, a, b, c);
-		std::cout << " basic call worked" << std::endl;
-		radialCriteria(*Xnew, radialCriteriaPercent);
-		energy(*Xnew, energyCall++, taskName, a, b, c);
-		std::cout << " radial criteria worked" << std::endl;
-		scoreAtoms(*Xnew);
-		energy(*Xnew, energyCall++, taskName, a, b, c);
-		std::cout << " the sub task worked" << std::endl;
-		RID(*Xnew, *(*structures.begin()));
-		energy(*Xnew, energyCall++, taskName, a, b, c);
-		std::cout << "rid worked" << std::endl;
-		*/
-		//end of tests
-
-		//as the commented out energy calls  worked above, something after this point causes the energy check to fail.
-		
-		if (localMinima.size() == coordinationSteps)
-		{
-			if (DEBUG) std::cout << "generating coordination numbers " << std::endl;
-			coordinationNumbers = generateAcceptedCoordinationNumbers(localMinima);
-		}
-		if (localMinima.size() >= coordinationSteps)
-		{
-			while (!coordinationNumber(*Xnew,coordinationNumbers) || !radialCriteria(*Xnew,radialCriteriaPercent))
-			{
-				if (DEBUG) std::cout << "did not pass criteria ";
-				if (DEBUG) {
-					if (coordinationNumber(*Xnew, coordinationNumbers)) std::cout << " radial" << std::endl;
-					else std::cout << " coordination numbers" << std::endl;
-				}
-				delete Xnew;
-				double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
-				//double variationX = x * sigmoidPercentageFromStep / 100;
-				//double variationY = y * sigmoidPercentageFromStep / 100;
-				//double variationZ = z * sigmoidPercentageFromStep / 100;
-				//Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
-				std::vector<double> movement;
-				for (int i = 0; i < s->elements.size(); i++)
-				{
-					for (int j = 0; j < s->set[i].size(); j++)
-					{
-						//should this be randomized between -1 to 1?
-						//x, y , z are the maximum movement, defining those parameters.
-						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x * sigmoidPercentageFromStep / 100);
-						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y * sigmoidPercentageFromStep / 100);
-						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z * sigmoidPercentageFromStep / 100);
-
-					}
-				}
-				Xnew = new structure(*s, movement);//new way
-
-			}
-		}
-		else {
-			while (!radialCriteria(*Xnew,radialCriteriaPercent))
-			{
-				if (DEBUG) std::cout << "did not pass criteria (radial) " << std::endl;
-				delete Xnew;
-				double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
-				//double variationX = x * sigmoidPercentageFromStep / 100;
-				//double variationY = y * sigmoidPercentageFromStep / 100;
-				//double variationZ = z * sigmoidPercentageFromStep / 100;
-				//Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
-				std::vector<double> movement;
-				for (int i = 0; i < s->elements.size(); i++)
-				{
-					for (int j = 0; j < s->set[i].size(); j++)
-					{
-						//should this be randomized between -1 to 1?
-						//x, y , z are the maximum movement, defining those parameters.
-						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x * sigmoidPercentageFromStep / 100);
-						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y * sigmoidPercentageFromStep / 100);
-						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z * sigmoidPercentageFromStep / 100);
-
-					}
-				}
-				Xnew = new structure(*s, movement);//new way
-			}
-		}
-
-
-		//check that the new structure does not violate radius criteria
-		//how do we make sure that this does not prevent a movement that should be allowed?
-		/*
-		Todo
-		
-		*/
-		if (DEBUG) std::cout << "checking for uniqueness " << std::endl;
-
-		//check for uniqueness
-		std::vector<structure*>::iterator it = structures.begin();
-		bool unique = true;
-		while (it != structures.end() && unique)
-		{
-			double dist = RID(*Xnew, *(*it));
-			if(dist < RIDthreshold)
-			{
-				unique = false;
-			}
-			it++;
-		}
-
-
-		if (unique)
-		{
-			if (DEBUG) std::cout << "unique " << std::endl;
-			// add to structures
-			structures.push_back(Xnew);
-			/*
-			when do you add a structure to local minima?
-			TODO
-			*/
-			//optimize Xnew
-			//Xnew = optimize(*Xnew);
-			std::string cmethod = "HF";
-			if (localMinima.size() > HFsteps)
-			{
-				cmethod = cmethod;
-			}
-			if (optimizationIterations > 0) {
-				switch (calculator)
-				{
-				case 'b':
-					//basin hopping energy
-					//no optimization
-					break;
-				case 'g':
-				{
-					//gaussain optimization
-					structure* tempXnew = optimizationGaussian(*Xnew, step, taskName, basis, cmethod, optimizationIterations, charge, state);
-					delete Xnew;
-					Xnew = tempXnew;
-					break;
-				}
-				default:
-				{
-					structure* tempXnew = optimizationGaussian(*Xnew, step, taskName, basis, cmethod, optimizationIterations, charge, state);
-					delete Xnew;
-					Xnew = tempXnew;
-					break;
-				}
-				}
-			}
-			
-			// this is causing a crash because there is no optimize
-			//should we add the optimized structure to structures? check if it already is in structures?
-			/*
-			TODO
-			*/
-			if (DEBUG) std::cout << "calling energy of Xnew " << std::endl;
-			double newEnergy;
-			switch (calculator)
-			{
-			case 'b':
-				//basin hopping energy
-				newEnergy = basinHoppingEnergy(*Xnew, energyCall++, taskName, a, b, c);
-				break;
-			case 'g':
-				//gaussain energy
-				newEnergy = energyGuassian(*Xnew, energyCall++, taskName, basis, method, charge, state);
-				break;
-			default:
-				newEnergy = energyGuassian(*Xnew, energyCall++, taskName, basis, method, charge, state);
-				break;
-			} 
-			if (DEBUG) std::cout << "Xnew energy: " << newEnergy << std::endl;
-			Xnew->energy = newEnergy;
-			bool accept = false;
-
-			if (newEnergy < seedEnergy)
-			{
-				if (DEBUG) std::cout << "accepted for lower, set new local minima " << std::endl;
-				accept = true;
-				stepsSinceNew = 0;
-				lastLocalMinima = Xnew;
-			}
-			else
-			{
-				/*
-				current seed is a local minima. add to local minima?
-				*/
-
-
-				double p = rand() / RAND_MAX;
-
-				double pThreshold = std::exp((seedEnergy - newEnergy)/(boltzman*temperature(stepsSinceNew,100,1.5)));//e^(Es-Ex)/KbT
-				if (p < pThreshold)
-				{
-					if (DEBUG) std::cout << "accepted by statistics, pushed last local minima " << std::endl;
-					accept = true;
-
-					//somehow its possible to get to this line of code when lastLocalMinima has not yet been set.
-					//this only occurs at the beginning, so maybe we should push back the seed in this case, however I am just going to not push anything in that case for now although likely it should be the seed.
-					if (lastLocalMinima != nullptr) {
-						std::cout << "pushing the last local minima" << lastLocalMinima->energy << std::endl;
-						localMinima.push_back(lastLocalMinima);
-						std::cout << " its energy is " << localMinima[localMinima.size() - 1]->energy << std::endl;
-					}
-
-						
-				}
-				
-			}
-			if (accept)
-			{
-				stepsSinceNew = 0;
-				//localMinima.push_back(Xnew);
-				//now only adding to local minima when moving to a higher energy or starting over
-				s = Xnew;
-				seedEnergy = newEnergy;
-				step++;
-				//need some way to save all energies?, maybe a variable in structure
-			}else {
-				if (DEBUG) std::cout << "rejected " << std::endl;
-				stepsSinceNew++;
-			}
-
 
 		}
-		else
-		{
-			if (DEBUG) std::cout << "not unique" << std::endl;
-			stepsSinceNew++;
-		}
+		//direction vec
 
-		stop = std::chrono::high_resolution_clock::now();
-		duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
-		hours = (double)duration.count() / (double)60;
 	}
-	if (DEBUG) std::cout << "prinitng results " << std::endl;
-	/*
-	print all structures
-	*/
-	std::string outputString = "";
-	//add composition
-	outputString += "Composition:\n";
-	for (int i = 0; i < composition.size(); i++)
-	{
-		outputString += elements[i] + std::to_string(composition[i]);
-	}
-	outputString += "\n";
-
-	//add cell size x y z
-	outputString += "Cell size:\n";
-	outputString += std::to_string(a) + " " + std::to_string(b) + " " + std::to_string(c) + "\n";
-
-	//rid threshold
-	outputString += "threshold:\n";
-	outputString += std::to_string(RIDthreshold)  + "\n";
-	//add the last accepted structure
-	outputString += "last energy,structure:\n";
-	std::string line = std::to_string(s->energy);
-	for (int e = 0; e < s->set.size(); e++)
-	{
-		for (int a = 0; a < s->set[e].size(); a++)
-		{
-			//each atom
-			line += " " + s->elements[e] + " " + std::to_string(s->set[e][a].x) + " " + std::to_string(s->set[e][a].y) + " " + std::to_string(s->set[e][a].z);
-		}
-	}
-	line += "\n";
-	outputString += line;
-	//add the most recent steps since new
-	outputString += "steps since new:\n";
-	outputString += std::to_string(stepsSinceNew) + "\n";
-	//coordination numbers
-	outputString += "coordination numbers:\n";
-	if (coordinationSteps <= localMinima.size())
-	{
-		coordinationNumbers = generateAcceptedCoordinationNumbers(localMinima);
-	}
-
-	//structures with energies
-	outputString += "local minima only: energy,structure:\n";
-
-	//int iii = 0;
-	std::cout << "local minima size: " << localMinima.size() << std::endl;
-	for (std::vector<structure*>::iterator c_structure = localMinima.begin(); c_structure != localMinima.end(); c_structure++)
-	{
-		
-		//std::cout << "going through the localMinima " << iii++ << " e: " << (*c_structure)->energy << std::endl;//remove later
-		std::string line = "energy: " + std::to_string((*c_structure)->energy);
-		for (int e = 0; e < (*c_structure)->set.size(); e++)
-		{
-			for (int a = 0; a < (*c_structure)->set[e].size(); a++)
-			{
-				//each atom
-				line += " " + (*c_structure)->elements[e] + " " + std::to_string((*c_structure)->set[e][a].x) + " " + std::to_string((*c_structure)->set[e][a].y) + " " + std::to_string((*c_structure)->set[e][a].z);
-			}
-		}
-		line += "\n";
-		outputString += line;
-	}
-	/*
-	//the below code had a memory error which i dont understand
-	for (int i = 0; i < localMinima.size(); i++)
-	{
-		//for each structure
-		std::string line = "energy: " + std::to_string(localMinima[i]->energy);
-		for (int e = 0; e < localMinima[i]->set.size(); e++)
-		{
-			for (int a = 0; a < localMinima[i]->set[e].size(); a++)
-			{
-				//each atom
-				line += " " + localMinima[i]->elements[e] + " " + std::to_string(localMinima[i]->set[e][a].x) + " " + std::to_string(localMinima[i]->set[e][a].y) + " " + std::to_string(localMinima[i]->set[e][a].z);
-			}
-		}
-		line += "\n";
-		outputString += line;
-	}
-	*/
-	outputString += "all structures: energy,structure:\n";
-	//iii = 0;
-	for (std::vector<structure*>::iterator c_structure = structures.begin(); c_structure != structures.end(); c_structure++)
-	{
-		//for each structure
-		//std::cout << "going through the all structures " << iii++ << " e: " << (*c_structure)->energy << std::endl;//remove later
-		std::string line = "energy: " + std::to_string((*c_structure)->energy);
-		for (int e = 0; e < (*c_structure)->set.size(); e++)
-		{
-			for (int a = 0; a < (*c_structure)->set[e].size(); a++)
-			{
-				//each atom
-				line += " " + (*c_structure)->elements[e] + " " + std::to_string((*c_structure)->set[e][a].x) + " " + std::to_string((*c_structure)->set[e][a].y) + " " + std::to_string((*c_structure)->set[e][a].z);
-			}
-		}
-		line += "\n";
-		outputString += line;
-	}
-	//this syntax should be removed just incase
-	/*
-	for (int i = 0; i < structures.size(); i++)
-	{
-		//for each structure
-		std::string line = "energy: " + std::to_string(structures[i]->energy);
-		for (int e = 0; e < structures[i]->set.size(); e++)
-		{
-			for (int a = 0; a < structures[i]->set[e].size(); a++)
-			{
-				//each atom
-				line += " " + structures[i]->elements[e] + " " + std::to_string(structures[i]->set[e][a].x) + " " + std::to_string(structures[i]->set[e][a].y) + " " + std::to_string(structures[i]->set[e][a].z);
-			}
-		}
-		line += "\n";
-		outputString += line;
-	}
-	*/
-	int numStructures = structures.size();
-	//delete everything except output string
-	if (DEBUG) std::cout << "cleaning memory " << std::endl;
-	for (int i = 0; i < structures.size(); i++)
-	{
-		delete structures[i];
-	}
-	//open a file and print the output
-	std::ofstream outputfile(outputFileName + "_" + std::to_string(numStructures) + ".txt");
-	
-	// Write to the file
-	outputfile << outputString;
-
-	// Close the file
-	outputfile.close();
-
+	return std::pair<structure*, std::vector<double>>(new structure(*s, newDirVector), newDirVector);
 }
+
 
 std::pair< std::vector<int>, std::vector<std::string>> getComposition(std::string comp)
 {
+	bool bugging = false;
 	std::vector<int> composition;
 	std::vector<std::string> elements;
 	bool instring = true;//assume we start in a string
@@ -1872,12 +3112,13 @@ std::pair< std::vector<int>, std::vector<std::string>> getComposition(std::strin
 	int currint = 0;
 	for (int i = 0; i < comp.size(); i++)
 	{
-		if (comp[i] > 48 && comp[i] < 57)
+		if (bugging) std::cout << comp[i] << std::endl;
+		if (comp[i] >= 48 && comp[i] <= 57)
 		{
 			//numeric
 			if (i > 0) {
 				if (instring) {
-					if (DEBUG) std::cout << "added " << current << " to elements" << std::endl;
+					if (bugging) std::cout << "added " << current << " to elements" << std::endl;
 					//switch
 					instring = false;
 					elements.push_back(current);
@@ -1892,7 +3133,7 @@ std::pair< std::vector<int>, std::vector<std::string>> getComposition(std::strin
 			//uppercase
 			if (i > 0) {
 				if (!instring) {
-					if (DEBUG) std::cout << "added " << currint << " to composition" << std::endl;
+					if (bugging) std::cout << "added " << currint << " to composition" << std::endl;
 					//switch
 					instring = true;
 					composition.push_back(currint);
@@ -1900,7 +3141,7 @@ std::pair< std::vector<int>, std::vector<std::string>> getComposition(std::strin
 					
 				}
 				else {
-					if (DEBUG) std::cout << "added " << current << " to elements and " << 1 << " to composition" << std::endl;
+					if (bugging) std::cout << "added " << current << " to elements and " << 1 << " to composition" << std::endl;
 					//elements begin with capitals so the last one is over
 					elements.push_back(current);
 					composition.push_back(1);//only one of the last element
@@ -1915,7 +3156,7 @@ std::pair< std::vector<int>, std::vector<std::string>> getComposition(std::strin
 			//lowercase
 			if (i > 0) {
 				if (!instring) {
-					if (DEBUG) std::cout << "added " << currint << " to composition" << std::endl;
+					if (bugging) std::cout << "added " << currint << " to composition" << std::endl;
 					//switch
 					instring = true;
 					composition.push_back(currint);
@@ -1928,13 +3169,13 @@ std::pair< std::vector<int>, std::vector<std::string>> getComposition(std::strin
 	}
 	//dont forget who was added last
 	if (!instring) {
-		if (DEBUG) std::cout << "added " << currint << " to composition" << std::endl;
+		if (bugging) std::cout << "added " << currint << " to composition" << std::endl;
 		composition.push_back(currint);
 		currint = 0;
 		
 	}
 	else {
-		if (DEBUG) std::cout << "added " << current << " to elements and " << 1 << " to composition" << std::endl;
+		if (bugging) std::cout << "added " << current << " to elements and " << 1 << " to composition" << std::endl;
 		//elements begin with capitals so the last one is over
 		elements.push_back(current);
 		composition.push_back(1);//omly one of the last element
@@ -1943,463 +3184,640 @@ std::pair< std::vector<int>, std::vector<std::string>> getComposition(std::strin
 	}
 	return std::pair< std::vector<int>, std::vector<std::string>>(composition, elements);
 }
+//(structure* initializationStructure, double x, double y, double z, double percentChangeI, double percentChangeF, double RIDpercent, std::vector<int> composition, std::vector<std::string> elements, int charge, int state, char calculator, std::string method, std::string basis, int optimizationIterations, int coordinationSteps, int HFsteps, int time, int localMinimaTrapping, int radialCriteriaPercent, int radialCriteriaTrappingIteration, int radialCriteriaTrappingFreedom, std::string outputFileName, std::string taskName, double a, double b, double c, bool blindGradientDescent = false, int directionExponent = 0, int proportionExponent = 1, double deltaEThr = 0.01, int hybridCycles = 0)
 
-void continueModifiedBasinHopping(std::string startFileName, int charge, int state, char calculator, std::string method, std::string basis, int optimizationCycles, double percentChangeI, double percentChangeF, int coordinationSteps,int HFsteps, int time, int localMinimaTrapping, int radialCriteriaPercent, std::string outputFileName,std::string taskName, double x, double y, double z)
+structure* optimize(structure& s)
 {
-	int energyCall = 1;
-	std::ifstream startFile(startFileName);
-	std::string line;
+	/*
+	Todo
+	*/
+	//thsi causes a crash dont use!
+	return nullptr;
+}
 
-	double RIDthreshold;
-	std::vector<structure*> structures;
-	double a;
-	double b;
-	double c;
-	std::vector<int> composition;
-	std::vector<std::string> elements;
-	structure* s;
-	int stepsSinceNew;
-
-	std::getline(startFile, line);// "Composition:\n";
-	std::getline(startFile, line);
-	std::pair< std::vector<int>, std::vector<std::string>> comp = getComposition(line);
-	int debugo = 0;
-	composition = comp.first;
-	elements = comp.second;
-	
-	std::getline(startFile, line);//;"Cell size:\n";
-	std::getline(startFile, line); //std::to_string(x) + " " + std::to_string(y) + " " + std::to_string(z) + "\n";
-	int xstart = 0;
-	int ystart = 0;
-	int zstart = 0;
-	for (int i = 0; i < line.size(); i++)
+double energyCalculation(structure* s,std::string basis, std::string method,int charge, int state, char calculator, std::string taskName, int energyCall, bool keepFiles, std::string converge = "1.0e-6", double timeLeftMinutes = -1, double timeoutMinutes = -1, std::string AMSHOME = "/home/jpburkhardt/scm/ams2023.104") {
+	double retValue = 0;
+	switch (calculator)
 	{
-		if (line[i] == ' ')
+	case 'a':
+		//adf/scm energy
+		retValue = energyADF(*s, taskName, basis, method, charge, state, AMSHOME,energyCall,converge, timeoutMinutes, timeLeftMinutes, keepFiles);
+		break;
+	case 'b':
+		//basin hopping energy
+		retValue = basinHoppingEnergy(*s, energyCall++, taskName, 0, 0, 0);
+		break;
+	case 'g':
+		//gaussain energy
+		retValue = newEnergyGaussian(*s, taskName, basis, method, charge, state, energyCall, 300, 0, timeoutMinutes, timeLeftMinutes, keepFiles);
+		//retValue = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state, keepFiles);
+		break;
+	default:
+		retValue = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state, keepFiles);
+		break;
+	}
+	return retValue;
+}
+
+structure* optimizationCalculation(char calculator, structure* Xnew, int step, std::string taskName, int optimizationIterations,int maxSCF, double x, double y, double z, std::vector<double> & optimizationMovement,std::vector<structure*>& structures,std::string basis, std::string method, int charge, int state, bool keepFiles, std::string converge = "1.0e-6",double timeLeftMinutes = -1,double timeoutMinutes = -1, std::string AMSHOME = "/home/jpburkhardt/scm/ams2023.104")
+{
+	structure* optimizedStructure;
+	switch (calculator)
+	{
+		case 'a':
 		{
-			if (ystart == 0) ystart = i;
-			else zstart = i;
+			optimizedStructure = optimizationADF(*Xnew, taskName, basis, method, charge, state, AMSHOME,step,maxSCF,converge,timeoutMinutes,timeLeftMinutes, keepFiles);
+			break;
+		}
+		case 'b':
+		{
+			optimizedStructure = optimizationBasinHopping(*Xnew, step, taskName, optimizationIterations, x, y, z);
+			break;
+		}
+		case 'g':
+		{
+			optimizedStructure = newOptimizationGaussian(*Xnew, taskName, basis, method, charge, state, step, maxSCF, optimizationIterations, timeoutMinutes, timeLeftMinutes, keepFiles);
+			//optimizedStructure = optimizationGaussian(*Xnew, step, taskName, basis, method, optimizationIterations, charge, state, maxSCF, keepFiles);
+			break;
+		}
+		default:
+		{
+			optimizedStructure = optimizationGaussian(*Xnew, step, taskName, basis, method, optimizationIterations, charge, state,maxSCF, keepFiles);
+			break;
 		}
 	}
-	a = std::stof(line.substr(xstart, ystart-xstart));
-	b = std::stof(line.substr(ystart, zstart - ystart));
-	c = std::stof(line.substr(zstart, zstart-line.size()));
-
-	std::getline(startFile, line); //"threshold:\n";
-	std::getline(startFile, line);
-	RIDthreshold = std::stoi(line);
-
-	std::getline(startFile, line);// "last energy,structure:\n";
-	std::getline(startFile, line);
-	s = new structure(line, elements, composition);
-	/*
-	Todo get the last structure
-	
-	*/
-	std::getline(startFile, line);// steps since new
-	std::getline(startFile, line);
-	stepsSinceNew = std::stoi(line);
-	/*
-	Todo set steps since new
-	*/
-	std::getline(startFile, line);// "coordination numbers:\n"; ?? what should i do with this?? - we recalculate later?
-	std::getline(startFile, line);// "local minima energy,structure:\n";
-	std::vector<structure*> previousLocalMinima;
-	std::vector<structure*> allLocalMinima = {};
-	structure* lastLocalMinima = nullptr;
-	std::getline(startFile, line);
-	while (line[0] != 'a')
+	if (optimizedStructure == nullptr)
 	{
-		structure* next = new structure(line, elements, composition);
-		previousLocalMinima.push_back(next);
-		allLocalMinima.push_back(next);
-		lastLocalMinima = next;//constantly reset until we get the actual last one
-		
-		//load the next line. the reason this isn't done in the conditional is because we need to stop at a text line
-		std::getline(startFile, line);
+		if (DEBUG) std::cout << "failed to optimize" << std::endl;
+		//optimizedStructure = Xnew;//give it back Xnew with a terrible energy
+		//optimizedStructure->energy = DBL_MAX;
 	}
-	//std::getline(startFile, line);// "all structures energy,structure:\n";// this should already be ignored
-
-	int totalStructures = 0;
-	while (std::getline(startFile, line))
-	{
-		totalStructures++;
+	else {
+		optimizationMovement = direction(*Xnew, *optimizedStructure);
 	}
-	
+	return optimizedStructure;
+}
 
-	// Close the file
-	startFile.close();
-
-
-
-	
-	double seedEnergy = s->energy;
-	structures.push_back(s);
-	//check it passes radial criteria?
-
-
-	//std::vector<structure*> structures = { s };
-	
-	
-	//double RIDthreshold = threshold(RID, s->composition, x, y, z, 1, 0);
-	
-	int step = 0;
-	//int stepsSinceNew = 0;
-	std::vector<std::set<int>> coordinationNumbers = generateAcceptedCoordinationNumbers(previousLocalMinima);
-
+void groupTheoryGradientDescent(std::string previousRun, std::vector<int> composition, std::vector<std::string> elements, double x, double y, double z, double rlimit, char seedMode, double percentChangeI, double percentChangeF, double RIDpercent, int charge, int state, char calculator, std::string method, std::string basis, int optimizationIterations, int SCFsteps, int HFsteps, double time, int localMinimaTrapping, int uphillstopping, int misstepTrapping, int radialCriteriaPercent, std::string outputFileName, std::string taskName, int directionExponent = 0, int proportionExponent = 1, double deltaEThr = 1, bool checkEnergy = false, bool optimizePositive = true, bool keepFiles = false, bool filterOff = false, std::string converge = "1.0e-6", int timeOutMinutes = -1, int timeOutMinutesSP = -1, bool covalentCriteriaMode = false, double covalentCriteriaPercent = 0, int covalentCriteriaLimit = 1000, int bondRequirement = 0, int criteriaIterations = 10000, bool planar = false, bool partialSymmetry = false, bool extraHoles = false, bool alignHoles = true,bool variantSymmetry = false,double nMultiplier = 1, double temperature = 293.15)
+{
 	auto start = std::chrono::high_resolution_clock::now();
-	auto stop = std::chrono::high_resolution_clock::now();
-	auto duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
-	double hours = (double)duration.count() / (double)60;
 
-	int maxint_ = 0;//remove later!
-	while (hours < double(time) - 0.5 && 150 > maxint_++)
+	if (planar)
 	{
-		if (DEBUG) std::cout << "step: " << step << " time: " << double(time) << std::endl;
-		step += 1;
-		structure* Xnew = nullptr;
+		std::cout << "planar functionality not yet implemented" << std::endl;
+	}
 
-		//to avoid local minima trapping, if for a while a new structure cant be accepted then move to a new one
-		if (stepsSinceNew > localMinimaTrapping)
+	int energyCall = 0;
+	double RIDthreshold = 0;
+	std::vector<structure*> structures = {};
+	//std::vector<std::set<int>> coordinationNumbers;
+	structure* gmeS = nullptr;//the global minima structure known
+	double globalMinimumEnergy = 0;//energy corresponding to gmeS
+	double globalMinimumTime = 0;
+	
+	int totalStructuresSearchedAtGME = 0;
+
+	structure* ls = nullptr; //current/last structure explored
+	double lastEnergy = 0;//energy corresponding to ls
+
+	structure* cMinima;//current local minima since the last seed reset
+	double latestLowestEnergy;//energy corresponding to cminima
+	std::vector<double> lowMovementVecor;//corresponding to cminima
+	double cMinDeltaE;//delta E at cmin
+
+	int stepsSinceNew = 0;
+	int recyclesSinceNew = 0;
+	int upHillSteps = 0;
+	int optimizationsInCurrentSeed = 0;
+
+	std::vector<structure*> localMinima = {};
+	int totalStructuresSearched = 0;
+
+	//not used in continue
+	structure* s = nullptr;
+	double seedEnergy = 0;
+	int ccSteps = 0;//current chain steps
+
+	int calculations = 0;
+	int step = 0;
+
+	std::vector<std::pair<int, bool>> symmetries = {};//used in seed mode i & r
+	std::vector<structure*> seeds = {};//used in seed mode o
+	if(seedMode != 'o')  symmetries = possibleSymmetry(composition, elements, rlimit, radialCriteriaPercent, 1, criteriaIterations);
+	int seedNo = 0;
+
+	if (previousRun != "")
+	{
+		if (STDOUT) std::cout << "continuing from previous file_: " << previousRun << std::endl;
+		energyCall = 1;
+		std::ifstream startFile(previousRun);
+		std::string inLine;
+		std::vector<int> composition;
+		std::vector<std::string> elements;
+		int stepsSinceNew = 0;
+		std::getline(startFile, inLine);// "Composition:\n";
+		std::getline(startFile, inLine);
+		std::pair< std::vector<int>, std::vector<std::string>> comp = getComposition(inLine);
+		int debugo = 0;
+		composition = comp.first;
+		elements = comp.second;
+		std::getline(startFile, inLine); //"threshold:\n";
+		std::getline(startFile, inLine);
+		RIDthreshold = std::stoi(inLine);
+		std::getline(startFile, inLine);// best structure
+		std::getline(startFile, inLine);
+		gmeS = new structure(inLine, elements, composition);
+		globalMinimumEnergy = gmeS->energy;//a variable for monitoring the global minimum found
+		globalMinimumTime = 0;
+		std::getline(startFile, inLine);//# minutes searched prior
+		int priorEnd = 0;
+		for (int i = 0; i < inLine.size(); i++)
 		{
-			if (DEBUG) std::cout << "steps since new passed "  << std::endl;
-			//should we restart the step size here for the purpose of deviation from seed?
-			step = 1;
-			//to avoid local minima trapping find a new (unique) seed
-			
-			bool seedAccepted = false;
-			if (DEBUG) std::cout << "looking for a new seed "  << std::endl;
-			/*
-			while (!seedAccepted)
-			{
-				//cant delete s because it might still be the last good structure
-				//delete s;
-				s = new structure(x, y, z, composition, elements);
-				std::vector<structure*>::iterator it = structures.begin();
-
-				if (localMinima.size() >= coordinationSteps)
-				{
-					while (!coordinationNumber(*s,coordinationNumbers) || !radialCriteria(*s,radialCriteriaPercent))
-					{
-						delete s;
-						s = new structure(x, y, z, composition, elements);
-					}
-				}
-				else {
-					while (!radialCriteria(*s,radialCriteriaPercent))
-					{
-						delete s;
-						s = new structure(x, y, z, composition, elements);
-					}
-				}
-				bool unique = true;
-
-				while (it != structures.end() && unique)
-				{
-					double dist = RID(*s, *(*it));
-					if (dist < RIDthreshold)
-					{
-						unique = false;
-					}
-					it++;
-				}
-				seedAccepted = unique;
-				if (!seedAccepted)
-				{
-					delete s;
-					//delete s here because we know we arent accepting it and we cant delete it at the top of the loop
-				}
-			}
-			*/
-			s = getAcceptedStructure(a, b, c, elements, composition, structures, allLocalMinima, coordinationSteps, coordinationNumbers, radialCriteriaPercent, RIDthreshold);
-			// a new seed to start with in s that is unique and passes criteria
-			double seedEnergy;
-			switch (calculator)
-			{
-			case 'b':
-				//basin hopping energy
-				seedEnergy = basinHoppingEnergy(*s, energyCall++, taskName, a, b, c);
-				break;
-			case 'g':
-				//gaussain energy
-				seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
-				break;
-			default:
-				seedEnergy = energyGuassian(*s, energyCall++, taskName, basis, method, charge, state);
-				break;
-			} 
-			
-			if (DEBUG) std::cout << "new seed found: " << seedEnergy << std::endl;
-			structures.push_back(s);
-			stepsSinceNew = 0;
+			if (inLine[i] == ' ' && priorEnd == 0) priorEnd = i;
 		}
-		//std::cout << "remove later, doing a completely random structure" << std::endl;
-		//energy(structure(*s, step), energyCall++, taskName, a, b, c);
-
-		if (DEBUG) std::cout << "creating a new structure " << std::endl;
-
-		//old way
-		double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
-		double variationX = x * sigmoidPercentageFromStep / 100;
-		double variationY = y * sigmoidPercentageFromStep / 100;
-		double variationZ = z * sigmoidPercentageFromStep / 100;
-
-		//new way
-		std::vector<double> movement;
-		for (int i = 0; i < s->elements.size(); i++)
+		globalMinimumTime = std::stof(inLine.substr(0, priorEnd));
+		std::getline(startFile, inLine);//# minutes searched prior
+		priorEnd = 0;
+		for (int i = 0; i < inLine.size(); i++)
 		{
-			for (int j = 0; j < s->set[i].size(); j++)
-			{
-				//should this be randomized between -1 to 1?
-
-				movement.push_back( (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x * sigmoidPercentageFromStep / 100);
-				movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y * sigmoidPercentageFromStep / 100);
-				movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z * sigmoidPercentageFromStep / 100);
-
-			}
+			if (inLine[i] == ' ' && priorEnd == 0) priorEnd = i;
 		}
-		Xnew = new structure(*s, movement);//new way
-		//Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);//old way
-		//tests
-		//
+		totalStructuresSearchedAtGME = std::stof(inLine.substr(0, priorEnd));
+		std::cout << "Current global minimum structure found after " << totalStructuresSearchedAtGME << " structures with energy " << globalMinimumEnergy << ": " << std::endl;
+		gmeS->print();
+		std::getline(startFile, inLine);//energy of best structure
+
+		for (int i = 0; i < composition.size(); i++) for (int j = 0; j < composition[i]; j++) std::getline(startFile, inLine);//element followed by coordinates
+		std::getline(startFile, inLine);// "last energy,structure:\n";
+		std::getline(startFile, inLine);
+		ls = new structure(inLine, elements, composition);
+		lastEnergy = ls->energy;
+		std::getline(startFile, inLine);//steps since new
+		std::getline(startFile, inLine);
+		stepsSinceNew = std::stoi(inLine);
+		std::getline(startFile, inLine);//recycles since new
+		std::getline(startFile, inLine);
+		recyclesSinceNew = std::stoi(inLine);
+		std::getline(startFile, inLine);//uphill steps
+		std::getline(startFile, inLine);
+		upHillSteps = std::stoi(inLine);
+		std::getline(startFile, inLine);//uphill steps
+		std::getline(startFile, inLine);
+		optimizationsInCurrentSeed = std::stoi(inLine);
+		std::getline(startFile, inLine);
+		std::getline(startFile, inLine);
+		step = std::stoi(inLine);
+		std::getline(startFile, inLine);
+		std::getline(startFile, inLine);
+		ccSteps = std::stoi(inLine);
+		std::getline(startFile, inLine);
+		std::getline(startFile, inLine);
+		seedNo = std::stoi(inLine);
+		std::getline(startFile, inLine);
+		seeds = {};
+		std::getline(startFile, inLine);
+		while (inLine[0] != 'l')
+		{
+			structure* next = new structure(inLine, elements, composition);
+			seeds.push_back(next);
+			std::getline(startFile, inLine);
+		}
 		/*
-		//std::cout << "calculating energy right now!" << std::endl;
-		energy(*Xnew, energyCall++, taskName, a, b, c);
-		std::cout << " basic call worked" << std::endl;
-		radialCriteria(*Xnew, radialCriteriaPercent);
-		std::cout << "testing" << std::endl;
-		energy(*Xnew, energyCall++, taskName, a, b, c);
-		std::cout << " radial criteria worked" << std::endl;
-		scoreAtoms(*Xnew);
-		energy(*Xnew, energyCall++, taskName, a, b, c);
-		std::cout << " the sub task worked" << std::endl;
-		RID(*Xnew, *(*structures.begin()));
-		std::cout << " the sub task worked" << std::endl;
-		energy(*Xnew, energyCall++, taskName, a, b, c);
-		std::cout << "rid worked" << std::endl;
+		Todo set steps since new
 		*/
-		//end of tests
-
-		//as the commented out energy calls  worked above, something after this point causes the energy check to fail.
-		
-		if (allLocalMinima.size() == coordinationSteps)
+		std::getline(startFile, inLine);// "local minima energy,structure:\n";
+		localMinima = {};
+		cMinima = nullptr;
+		std::getline(startFile, inLine);
+		while (inLine[0] != 'a')
 		{
-			if (DEBUG) std::cout << "generating coordination numbers " << std::endl;
-			coordinationNumbers = generateAcceptedCoordinationNumbers(allLocalMinima);
+			structure* next = new structure(inLine, elements, composition);
+			localMinima.push_back(next);
+			cMinima = next;//constantly reset until we get the actual last one
+
+			//load the next line. the reason this isn't done in the conditional is because we need to stop at a text line
+			std::getline(startFile, inLine);
 		}
-		if (allLocalMinima.size() >= coordinationSteps)
+		//std::getline(startFile, line);// "all structures energy,structure:\n";// this should already be ignored
+		//get all the structures now
+		latestLowestEnergy = cMinima->energy;
+		while (std::getline(startFile, inLine))
 		{
-			while (!coordinationNumber(*Xnew,coordinationNumbers) || !radialCriteria(*Xnew,radialCriteriaPercent))
-			{
-				if (DEBUG) std::cout << "did not pass criteria ";
-				if (DEBUG) {
-					if (coordinationNumber(*Xnew, coordinationNumbers)) std::cout << " radial" << std::endl;
-					else std::cout << " coordination numbers" << std::endl;
-				}
-				delete Xnew;
-				double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
+			structure* next = new structure(inLine, elements, composition);
+			structures.push_back(next);
+		}
+		totalStructuresSearched = structures.size();
+		// Close the file
+		startFile.close();
+	}
+	else {
+		RIDthreshold = threshold(RID, composition, elements, rlimit, rlimit, rlimit, 1, x, y, z, RIDpercent);
+		stepsSinceNew = 0;
+		upHillSteps = 0;
+		recyclesSinceNew = 0;//NEW METHOD - now steps since new will trigger returns to the last local minima, while recycles since new will trigger new seeds. monitored by the limit missteptrapping
+		optimizationsInCurrentSeed = 0;
+		structures = {};
+		localMinima = {};
+		totalStructuresSearched = structures.size();
 
-				std::vector<double> movement;
-				for (int i = 0; i < s->elements.size(); i++)
+		if (seedMode != 'o') {
+			do {
+				//s = seedFromGroupTheory(composition, elements, rlimit);
+				s = getSeedFromSymmetryMode(seedMode, composition, elements, rlimit, seedNo, symmetries);
+				while (!radialCriteria(*s, radialCriteriaPercent))
 				{
-					for (int j = 0; j < s->set[i].size(); j++)
-					{
-						//should this be randomized between -1 to 1?
-
-						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x * sigmoidPercentageFromStep / 100);
-						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y * sigmoidPercentageFromStep / 100);
-						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z * sigmoidPercentageFromStep / 100);
-
-					}
+					if (DEBUG) std::cout << "did not pass criteria (radial) in seed creation" << std::endl;
+					delete s;
+					s = getSeedFromSymmetryMode(seedMode, composition, elements, rlimit, seedNo, symmetries);
 				}
-				Xnew = new structure(*s, movement);//new way
+			} while (!bondingRequirement(s, radialCriteriaPercent, bondRequirement));
+			energyCall = 0;
+			double timeLeftMinutes = (double)time * 60;
 
-				//double variationX = x * sigmoidPercentageFromStep / 100;
-				//double variationY = y * sigmoidPercentageFromStep / 100;
-				//double variationZ = z * sigmoidPercentageFromStep / 100;
-				//Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
-			}
+			seedEnergy = energyCalculation(s, basis, method, charge, state, calculator, taskName, ++calculations, keepFiles, converge, timeLeftMinutes, timeOutMinutesSP);
 		}
 		else {
-			while (!radialCriteria(*Xnew,radialCriteriaPercent))
+			//create all the seeds, check all their energies, order them by energy and go one by one
+			std::cout << "Creating Seeds, time(m): " << (double)time * 60 << std::endl;
+			seeds = getSeeds(composition, elements, rlimit, radialCriteriaPercent, bondRequirement, criteriaIterations, partialSymmetry, extraHoles, alignHoles, variantSymmetry, nMultiplier);
+			std::cout << "Calculating energy of " << seeds.size() << " seeds, time(m) : " << (double)time * 60 << std::endl;
+			for (std::vector<structure*>::iterator it = seeds.begin(); it != seeds.end(); it++)
 			{
-				if (DEBUG) std::cout << "did not pass criteria (radial) " << std::endl;
-				delete Xnew;
-				double sigmoidPercentageFromStep = percentChangeI + (percentChangeF - percentChangeI) * (1 / (1 + exp(-step + 4)));
-
-				std::vector<double> movement;
-				for (int i = 0; i < s->elements.size(); i++)
-				{
-					for (int j = 0; j < s->set[i].size(); j++)
-					{
-						//should this be randomized between -1 to 1?
-
-						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * x * sigmoidPercentageFromStep / 100);
-						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * y * sigmoidPercentageFromStep / 100);
-						movement.push_back((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1) * z * sigmoidPercentageFromStep / 100);
-
-					}
-				}
-				Xnew = new structure(*s, movement);//new way
-				//double variationX = x * sigmoidPercentageFromStep / 100;
-				//double variationY = y * sigmoidPercentageFromStep / 100;
-				//double variationZ = z * sigmoidPercentageFromStep / 100;
-				//Xnew = new structure(*s, variationX, variationY, variationZ, a, b, c);
+				double timeLeftMinutes = (double)time * 60;
+				double currentEnergy = energyCalculation(*it, basis, method, charge, state, calculator, taskName, ++calculations, keepFiles, converge, timeLeftMinutes, timeOutMinutesSP);
+				(*it)->energy = currentEnergy;
 			}
+			//sort seeds by energy
+			std::cout << "Sorting seeds, time(m): " << (double)time * 60 << std::endl;
+			std::sort(seeds.begin(), seeds.end(),energyCompare);
+			std::ofstream outputfile(outputFileName + "_seed_energies" + ".txt");
+			// Write to the file
+			for (std::vector<structure*>::iterator it = seeds.begin(); it != seeds.end(); it++)
+			{
+				std::string line = "energy: " + std::to_string((*it)->energy) + "\n";
+				outputfile << line;
+			}
+
+			// Close the file
+			outputfile.close();
+			writeToXyz(seeds, outputFileName + "_seeds" + ".xyz");
+
+			//start with seeed 1
+			s = seeds[0];
+
 		}
+		gmeS = s;//the global minima structure known
+		globalMinimumEnergy = seedEnergy;//energy corresponding to gmeS
+		totalStructuresSearchedAtGME = 1;
+
+		ls = s; //current/last structure explored
+		lastEnergy = seedEnergy;//energy corresponding to ls
+
+		cMinima = s;//current local minima since the last seed reset
+		latestLowestEnergy = seedEnergy;//energy corresponding to cminima
+		
+
+		ccSteps = 0;//current chain steps
 
 
-		//check that the new structure does not violate radius criteria
-		if (DEBUG) std::cout << "checking for uniqueness " << std::endl;
+		step = 0;
 
-		//check for uniqueness
-		std::vector<structure*>::iterator it = structures.begin();
-		bool unique = true;
-		while (it != structures.end() && unique)
+
+
+	}
+	
+	
+	cMinDeltaE = 0;//delta E at cmin
+
+	/*
+	Create seed
+	*/
+
+	std::vector<double> movement = {};
+	int natoms = 0;
+	for (int i = 0; i < ls->elements.size(); i++)
+	{
+		for (int j = 0; j < ls->set[i].size(); j++)
 		{
-			double dist = RID(*Xnew, *(*it));
-			if(dist < RIDthreshold)
-			{
-				unique = false;
-			}
-			it++;
+			natoms++;
+			movement.push_back(x * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+			movement.push_back(y * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+			movement.push_back(z * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
 		}
+	}
+	lowMovementVecor = movement;//corresponding to cminima//data is lost in continue
+	
+	
 
+	
+	
+	//also initialize the energy changel
 
-		if (unique)
+	double deltaE = -0.1 * deltaEThr;
+	//change 10
+
+	
+	auto stop = std::chrono::high_resolution_clock::now();
+	auto duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
+	double minutes = (double)duration.count() / (double)60;
+	if (DEBUG) std::cout << "minutes:  " << minutes << " ; time limit: " << double(time) * 60 - 30 << std::endl;
+	int maxint_ = 0;//remove later!
+
+	while (minutes < double(time) * 60 - 30)
+	{
+		ccSteps++;//current chain steps. gets reset every time a new seed is found, and is used to determine when to switch to blind gradient descent in the hybrid model. unfortunately it is distinct from all other step counters.
+		maxint_++;
+		if (DEBUG) std::cout << "MONITOR______________: " << " totalStructures: " << structures.size() << " total steps: " << maxint_ << std::endl;
+		if (DEBUG || STDOUT) std::cout << "step: " << step << " time: " << minutes / 60 << std::endl;
+		//step += 1;
+		structure* Xnew = nullptr;
+
+		//move back to cMinima
+		if (stepsSinceNew > localMinimaTrapping || upHillSteps > uphillstopping)
 		{
-			if (DEBUG) std::cout << "unique " << std::endl;
-			// add to structures
-			structures.push_back(Xnew);
-			/*
-			when do you add a structure to local minima?
-			TODO
-			*/
-			//optimize Xnew
-			//Xnew = optimize(*Xnew);
-			std::string cmethod = "HF";
-			if (allLocalMinima.size() > HFsteps)
+			//NEW METHOD
+			//we will return to the last local minima
+			ls = cMinima;
+			lastEnergy = latestLowestEnergy;
+			movement = lowMovementVecor;
+
+			recyclesSinceNew++;
+			stepsSinceNew = 0;
+
+			//reset movement
+			movement = {};
+			for (int i = 0; i < ls->elements.size(); i++)
 			{
-				cmethod = cmethod;
-			}
-			if (optimizationCycles > 0) {
-				switch (calculator)
+				for (int j = 0; j < ls->set[i].size(); j++)
 				{
-				case 'b':
-					//basin hopping energy
-					//no optimization
-					break;
-				case 'g':
-				{
-					//gaussain energy
-					structure* tempXnew = optimizationGaussian(*Xnew, step, taskName, basis, cmethod, optimizationCycles, charge, state);
-					delete Xnew;
-					Xnew = tempXnew;
-					break;
-				}
-				default:
-				{
-					structure* tempXnew = optimizationGaussian(*Xnew, step, taskName, basis, cmethod, optimizationCycles, charge, state);
-					delete Xnew;
-					Xnew = tempXnew;
-					break;
-				}
+					movement.push_back(x * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+					movement.push_back(y * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+					movement.push_back(z * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
 				}
 			}
-			//structure* tempXnew = optimizationGaussian(*Xnew, step, taskName, basis, cmethod, optimizationCycles, charge, state);
-			//delete Xnew;
-			//Xnew = tempXnew;
-			// this is causing a crash because there is no optimize
-			//should we add the optimized structure to structures? check if it already is in structures?
-			/*
-			TODO
-			*/
-			if (DEBUG) std::cout << "calling energy of Xnew " << std::endl;
-			double newEnergy;
-			//= energyGuassian(*Xnew, energyCall++, taskName, basis, method, charge, state);
-			switch (calculator)
+			//make delta Ethr small at first
+			deltaE = -0.1 * deltaEThr;
+		}
+		//Find a new seed
+		if (recyclesSinceNew > misstepTrapping)
+		{
+			seedNo++;
+			movement = {};
+			for (int i = 0; i < ls->elements.size(); i++)
 			{
-			case 'b':
-				//basin hopping energy
-				newEnergy = basinHoppingEnergy(*Xnew, energyCall++, taskName, a, b, c);
-				break;
-			case 'g':
-				//gaussain energy
-				newEnergy = energyGuassian(*Xnew, energyCall++, taskName, basis, method, charge, state);
-				break;
-			default:
-				newEnergy = energyGuassian(*Xnew, energyCall++, taskName, basis, method, charge, state);
-				break;
-			}
-				if (DEBUG) std::cout << "Xnew energy: " << newEnergy << std::endl;
-			Xnew->energy = newEnergy;
-			bool accept = false;
-
-			if (newEnergy < seedEnergy)
-			{
-				if (DEBUG) std::cout << "last energy: " << seedEnergy << " new energy: " << newEnergy << std::endl;
-				if (DEBUG) std::cout << "accepted for lower, set new local minima " << std::endl;
-				accept = true;
-				stepsSinceNew = 0;
-				lastLocalMinima = Xnew;
-			}
-			else
-			{
-				if (DEBUG) std::cout << "last energy: " << seedEnergy << " new energy: " << newEnergy << std::endl;
-				/*
-				current seed is a local minima. add to local minima?
-				*/
-
-
-				double p = rand() / RAND_MAX;
-
-				double pThreshold = std::exp((seedEnergy - newEnergy)/(boltzman*temperature(stepsSinceNew,100,1.5)));//e^(Es-Ex)/KbT
-				if (p < pThreshold)
+				for (int j = 0; j < ls->set[i].size(); j++)
 				{
-					if (DEBUG) std::cout << "accepted by statistics, pushed last local minima " << std::endl;
-					accept = true;
-
-					//somehow its possible to get to this line of code when lastLocalMinima has not yet been set.
-					//this only occurs at the beginning, so maybe we should push back the seed in this case, however I am just going to not push anything in that case for now although likely it should be the seed.
-					if (lastLocalMinima != nullptr) {
-						std::cout << "pushing the last local minima" << lastLocalMinima->energy << std::endl;
-						allLocalMinima.push_back(lastLocalMinima);
-						std::cout << " its energy is " << allLocalMinima[allLocalMinima.size() - 1]->energy << std::endl;
-					}
-
-						
+					movement.push_back(x * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+					movement.push_back(y * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+					movement.push_back(z * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+				}
+			}
+			bool seedAccepted = false;
+			if (seedMode == 'o')
+			{
+				if (seedNo < seeds.size()) {
+					s = seeds[seedNo];
+					seedEnergy = s->energy;
 				}
 				else {
-					if (DEBUG) std::cout << "rejected by statistics" << std::endl;
+					seedNo = 0;
+					//seedMode = 'n';//we ran through all the seeds, go to no symmetry for continued running
+					/*
+					* TODO
+					There is currently an error where all the seeds made with no symmetry are broken, while this is not fixed we should loop the old seeds.
+					*/
 				}
-				
 			}
-			if (accept)
+			if (seedMode != 'o') {
+				while (!seedAccepted) {
+					std::vector<structure*>::iterator it = structures.begin();
+					do {
+						//s = seedFromGroupTheory(composition, elements, rlimit);
+						s = getSeedFromSymmetryMode(seedMode, composition, elements, rlimit, seedNo, symmetries);
+						while (!radialCriteria(*s, radialCriteriaPercent))
+						{
+							if (DEBUG) std::cout << "did not pass criteria (radial) in seed creation" << std::endl;
+							delete s;
+							s = getSeedFromSymmetryMode(seedMode, composition, elements, rlimit, seedNo, symmetries);
+							//s = seedFromGroupTheory(composition, elements, rlimit);
+						}
+					} while (!bondingRequirement(s, radialCriteriaPercent, bondRequirement));
+					if (DEBUG) std::cout << "checking for uniqueness " << std::endl;
+					bool unique = true;
+					if (!filterOff) {
+						while (it != structures.end() && unique)
+						{
+							double dist = RID(*s, *(*it));
+							if (dist < RIDthreshold)
+							{
+								unique = false;
+							}
+							it++;
+						}
+					}
+					seedAccepted = unique;
+				}
+				double timeLeftMinutes = (double)time * 60 - minutes;
+				seedEnergy = energyCalculation(s, basis, method, charge, state, calculator, taskName, ++calculations, keepFiles, converge, timeLeftMinutes, timeOutMinutesSP);
+			}
+			
+
+
+			deltaE = -0.1 * deltaEThr;
+			recyclesSinceNew = 0;
+			stepsSinceNew = 0;
+			optimizationsInCurrentSeed = 0;
+			
+
+			//set the last structure to the new seed
+			ls = s;
+			lastEnergy = seedEnergy;
+
+			//add the last minima to list
+			localMinima.push_back(cMinima);
+			
+
+			//set the current local minima to seed as well
+			latestLowestEnergy = seedEnergy;
+			cMinima = s;
+
+		}
+		if (STDOUT) std::cout << "Creating a new structure" << std::endl;
+		std::pair<structure*, std::vector<double>> XnewPair = createXnew(ls, percentChangeI, percentChangeF, step, x, y, z, movement, true, directionExponent, proportionExponent, deltaE, deltaEThr, 0, ccSteps);
+		if (covalentCriteriaMode)
+		{
+			int attempts = 0;
+			while ((!covalentCriteria(XnewPair.first, covalentCriteriaPercent) || !bondingRequirement(XnewPair.first, covalentCriteriaPercent, bondRequirement)) && attempts < covalentCriteriaLimit)
 			{
+				delete XnewPair.first;
+				XnewPair = createXnew(ls, percentChangeI, percentChangeF, step, x, y, z, movement, true, directionExponent, proportionExponent, deltaE, deltaEThr, 0, ccSteps);
+				attempts++;
+			}
+			if (attempts >= covalentCriteriaLimit)
+			{
+				std::cout << "BGD algorithm trapped by covalent criteria. Returning to LLM with minor inefficency" << std::endl;
+				//group theory gradient is stuck, return to the last local minima
+				XnewPair = std::pair<structure*, std::vector<double>>(cMinima, lowMovementVecor);
+				XnewPair.first->energy = latestLowestEnergy;
+
+			}
+		}
+		Xnew = XnewPair.first;
+		std::vector<double> proposedDirectionVector = XnewPair.second;
+		structures.push_back(Xnew);
+
+		movement = proposedDirectionVector;
+		std::vector<double> optimizationMovement;
+		if (STDOUT)
+		{
+			std::cout << "New structure before optimization:" << std::endl;
+			Xnew->print();
+		}
+
+
+		bool optimize = true;
+		if (checkEnergy)
+		{
+			
+			//prevent optimization on terrible structures
+			double timeLeftMinutes = (double)time * 60 - minutes;
+
+			double tempEnergy = energyCalculation(Xnew, basis, method, charge, state, calculator, taskName, ++calculations, keepFiles,converge, timeLeftMinutes, timeOutMinutesSP);
+			if (!optimizePositive) {
+				if (tempEnergy < 0)
+				{
+					optimize = true;
+				}
+				else {
+					optimize = false;
+				}
+			}
+			Xnew->energy = tempEnergy;
+		}
+		if (optimizationIterations > 0 && optimize) {
+			if (STDOUT) std::cout << "optimizing current new structure" << std::endl;
+			
+			std::string cmethod = "HF";
+			if (optimizationsInCurrentSeed >= HFsteps) cmethod = method;
+
+			stop = std::chrono::high_resolution_clock::now();
+			duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
+			minutes = (double)duration.count();
+			double timeLeftMinutes = (double)time * 60 - minutes;
+
+			structure* tempXnew = optimizationCalculation(calculator, Xnew,++calculations, taskName, optimizationIterations, SCFsteps, x, y, z, optimizationMovement, structures, basis, cmethod, charge, state,keepFiles,converge, timeLeftMinutes,timeOutMinutes);
+			if (tempXnew == nullptr)
+			{
+				if (STDOUT) std::cout << "optimization failed" << std::endl;
+				std::cout << "optimization failed.";
+				if (checkEnergy) std::cout << "Energy before optimization (used) : " << Xnew->energy;
+				std::cout << std::endl;
+				if(!checkEnergy) Xnew->energy = DBL_MAX;//as of now energy is not taken from a failed optimization, the failed optimization structure is also not used but in future versions this will be implemented. so the energy should be set to double max for the failure, therefore with check energy turned on the algorithm will be more proficient
+			}
+			else {
+				Xnew = tempXnew;
+				structures.push_back(Xnew);
+				std::vector<double> combinedMovement;
+				if (STDOUT) std::cout << "movement before optimization: ";
+				//print the movement and optimization movement vectors
+				if (STDOUT) for (int i = 0; i < movement.size(); i++) std::cout << " " << movement[i];
+				if (STDOUT) std::cout << std::endl << "optimization movement: ";
+				if (STDOUT) for (int i = 0; i < optimizationMovement.size(); i++) std::cout << " " << optimizationMovement[i];
+				if (STDOUT) std::cout << std::endl << "combined: ";
+				std::cout << std::endl << "movement size:" << movement.size() << " " << "opt size: " << optimizationMovement.size() << std::endl;
+				for (int i = 0; i < movement.size(); i++) combinedMovement.push_back(movement[i] + optimizationMovement[i]);
+				std::cout << std::endl << "movement size:" << movement.size() << " " << "opt size: " << optimizationMovement.size() << std::endl;
+				if (STDOUT) for (int i = 0; i < combinedMovement.size(); i++) std::cout << " " << combinedMovement[i];
+				if (STDOUT) std::cout << std::endl;
+				movement = combinedMovement;
+				if (STDOUT)
+				{
+					std::cout << "New structure after optimization with energy:"  << Xnew->energy  << std::endl;
+					Xnew->print();
+					
+				}
+
+			}
+
+		}
+
+
+		if (DEBUG) std::cout << "calling energy of Xnew " << std::endl;
+		double newEnergy = Xnew->energy;//energy is now taken from the optimizers
+			//energyCalculation(Xnew, basis, method, charge, state, calculator, taskName, energyCall, keepFiles);
+		if (DEBUG) std::cout << "Xnew energy: " << newEnergy << std::endl;
+		if (STDOUT) std::cout << "New structure energy: " << newEnergy << std::endl;
+		if (STDOUT) Xnew->printZmatrix();
+
+		totalStructuresSearched += 1;//only add 1 as we only checked the optimized energy, not the xnew energy in that case
+		if (globalMinimumEnergy > newEnergy)
+		{
+			globalMinimumEnergy = newEnergy;
+			globalMinimumTime = (double)duration.count();
+			gmeS = Xnew;
+			totalStructuresSearchedAtGME = totalStructuresSearched;
+		}
+
+		Xnew->energy = newEnergy;
+
+		//Checking criteria
+		if (newEnergy < lastEnergy)
+		{
+			upHillSteps = 0;
+			if (STDOUT) std::cout << "BGG Mode: New structure accepted for lower energy, set new local minima " << std::endl;
+
+
+			if (newEnergy < latestLowestEnergy)
+			{
+				latestLowestEnergy = newEnergy;
 				stepsSinceNew = 0;
-				//localMinima.push_back(Xnew);
-				//now only adding to local minima when moving to a higher energy or starting over
-				s = Xnew;
-				seedEnergy = newEnergy;
-				step++;
-				//need some way to save all energies?, maybe a variable in structure
-			}else {
-				if (DEBUG) std::cout << "rejected " << std::endl;
+				
+				cMinima = Xnew;
+				lowMovementVecor = movement;
+				cMinDeltaE = newEnergy - lastEnergy;
+			}
+			else {
+				//not cminima, steps since new increasing anyways
 				stepsSinceNew++;
 			}
-
-
 		}
 		else
 		{
-			if (DEBUG) std::cout << "not unique" << std::endl;
+			upHillSteps++;
 			stepsSinceNew++;
+			if (STDOUT) std::cout << "BGG Mode: New structure has higher energy, steps since new local Minima increased: " << stepsSinceNew << " with " << localMinimaTrapping << " limit" << std::endl;
+
 		}
+
+		//we will always be accepting
+		ls = Xnew;
+		deltaE = newEnergy - lastEnergy;
+		lastEnergy = newEnergy;
+		step++;
+
+
+
+
+		if (STDOUT) {
+			std::cout << "CYCLE END: Current global minima energy, time,  and structure: " << globalMinimumEnergy << " " << globalMinimumTime << std::endl;
+			gmeS->print();
+			gmeS->printZmatrix();
+		}
+
+
 
 		stop = std::chrono::high_resolution_clock::now();
 		duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
-		hours = (double)duration.count() / (double)60;
+		minutes = (double)duration.count();
 	}
-	if (DEBUG) std::cout << "prinitng results " << std::endl;
+
+	localMinima.push_back(cMinima);
+
+
+
+	if (DEBUG || STDOUT) std::cout << "printing results " << std::endl;
+	gmeS->writeToXyz(outputFileName + ".xyz");
+	//gmeS->writeToObj(outputFileName + ".obj");
 	/*
 	print all structures
 	*/
@@ -2412,112 +3830,158 @@ void continueModifiedBasinHopping(std::string startFileName, int charge, int sta
 	}
 	outputString += "\n";
 
-	//add cell size x y z
-	outputString += "Cell size:\n";
-	outputString += std::to_string(a) + " " + std::to_string(b) + " " + std::to_string(c) + "\n";
-
 	//rid threshold
-	outputString += "threshold:\n";
-	outputString += std::to_string(RIDthreshold)  + "\n";
+	outputString += "RID threshold:\n";
+	outputString += std::to_string(0) + "\n";
+	//add the Global minima structure
+	outputString += "Best structure:\n";
+	std::string line = "energy: " + std::to_string((gmeS)->energy);
+	for (int e = 0; e < (gmeS)->set.size(); e++)
+	{
+		for (int a = 0; a < (gmeS)->set[e].size(); a++)
+		{
+			//each atom
+			line += " " + (gmeS)->elements[e] + " " + std::to_string((gmeS)->set[e][a].x) + " " + std::to_string((gmeS)->set[e][a].y) + " " + std::to_string((gmeS)->set[e][a].z);
+		}
+	}
+	line += "\n";
+	outputString += line;
+	
+	std::string gline = std::to_string((int)globalMinimumTime) + " minutes prior\n" + std::to_string(totalStructuresSearchedAtGME) + " structures searched prior" + "\n" + "Energy: " + std::to_string(globalMinimumEnergy) + " \n";
+	int zitt = 0;
+	gmeS->makeZmatrix();
+	for (int e = 0; e < gmeS->set.size(); e++)
+	{
+		for (int a = 0; a < gmeS->set[e].size(); a++)
+		{
+			//each atom
+			gline += " " + gmeS->elements[e] + " " + std::to_string(gmeS->zmatrix[zitt][0]) + " " + std::to_string(gmeS->zmatrix[zitt][1]) + " " + std::to_string(gmeS->zmatrix[zitt][2]) + "\n";
+			zitt++;
+		}
+	}
+	/*
+	for (int e = 0; e < gmeS->set.size(); e++)
+	{
+		for (int a = 0; a < gmeS->set[e].size(); a++)
+		{
+			//each atom
+			gline += " " + gmeS->elements[e] + " " + std::to_string(gmeS->set[e][a].x) + " " + std::to_string(gmeS->set[e][a].y) + " " + std::to_string(gmeS->set[e][a].z) + "\n";
+		}
+	}*/
+
+	outputString += gline;
 	//add the last accepted structure
 	outputString += "last energy,structure:\n";
-	std::string line2 = std::to_string(s->energy);
+	line = std::to_string(s->energy);
 	for (int e = 0; e < s->set.size(); e++)
 	{
 		for (int a = 0; a < s->set[e].size(); a++)
 		{
 			//each atom
-			line2 += " " + s->elements[e] + " " + std::to_string(s->set[e][a].x) + " " + std::to_string(s->set[e][a].y) + " " + std::to_string(s->set[e][a].z);
+			line += " " + s->elements[e] + " " + std::to_string(s->set[e][a].x) + " " + std::to_string(s->set[e][a].y) + " " + std::to_string(s->set[e][a].z);
 		}
 	}
-	line2 += "\n";
-	outputString += line2;
+	line += "\n";
+	outputString += line;
 	//add the most recent steps since new
 	outputString += "steps since new:\n";
 	outputString += std::to_string(stepsSinceNew) + "\n";
-	//coordination numbers
-	outputString += "coordination numbers:\n";
-	if (coordinationSteps <= allLocalMinima.size())
+	outputString += "recycles since new:\n";
+	outputString += std::to_string(recyclesSinceNew) + "\n";
+	outputString += "uphill steps since new:\n";
+	outputString += std::to_string(upHillSteps) + "\n"; 
+	outputString += "optimizations in current seed:\n";
+	outputString += std::to_string(optimizationsInCurrentSeed) + "\n";
+	outputString += "step:\n";
+	outputString += std::to_string(step) + "\n";
+	outputString += "ccStep:\n";
+	outputString += std::to_string(ccSteps) + "\n";
+	//seedstructures with energies NEW, incorporate back into the conitnue function
+	outputString += "seedNo:\n";
+	outputString += std::to_string(seedNo) + "\n";
+	outputString += "seeds, energy structure:\n";
+	for (std::vector<structure*>::iterator it = seeds.begin(); it != seeds.end(); it++)
 	{
-		coordinationNumbers = generateAcceptedCoordinationNumbers(allLocalMinima);
-	}
-
-	//structures with energies
-	outputString += "local minima only: energy,structure:\n";
-
-	//int iii = 0;
-	std::cout << "local minima size: " << allLocalMinima.size() << std::endl;
-	for (std::vector<structure*>::iterator c_structure = allLocalMinima.begin(); c_structure != allLocalMinima.end(); c_structure++)
-	{
-		
-		//std::cout << "going through the localMinima " << iii++ << " e: " << (*c_structure)->energy << std::endl;//remove later
-		std::string line3 = "energy: " + std::to_string((*c_structure)->energy);
-		for (int e = 0; e < (*c_structure)->set.size(); e++)
+		std::string line = "energy: " + std::to_string((*it)->energy);
+		for (int e = 0; e < (*it)->set.size(); e++)
 		{
-			for (int a = 0; a < (*c_structure)->set[e].size(); a++)
+			for (int a = 0; a < (*it)->set[e].size(); a++)
 			{
 				//each atom
-				line3 += " " + (*c_structure)->elements[e] + " " + std::to_string((*c_structure)->set[e][a].x) + " " + std::to_string((*c_structure)->set[e][a].y) + " " + std::to_string((*c_structure)->set[e][a].z);
-			}
-		}
-		line3 += "\n";
-		outputString += line3;
-	}
-	/*
-	//the below code had a memory error which i dont understand
-	for (int i = 0; i < localMinima.size(); i++)
-	{
-		//for each structure
-		std::string line = "energy: " + std::to_string(localMinima[i]->energy);
-		for (int e = 0; e < localMinima[i]->set.size(); e++)
-		{
-			for (int a = 0; a < localMinima[i]->set[e].size(); a++)
-			{
-				//each atom
-				line += " " + localMinima[i]->elements[e] + " " + std::to_string(localMinima[i]->set[e][a].x) + " " + std::to_string(localMinima[i]->set[e][a].y) + " " + std::to_string(localMinima[i]->set[e][a].z);
+				line += " " + (*it)->elements[e] + " " + std::to_string((*it)->set[e][a].x) + " " + std::to_string((*it)->set[e][a].y) + " " + std::to_string((*it)->set[e][a].z);
 			}
 		}
 		line += "\n";
 		outputString += line;
 	}
-	*/
+	outputString += "local minima only: energy,structure:\n";
+	//Old
+	//int iii = 0;
+	std::cout << "local minima size: " << localMinima.size() << std::endl;
+	for (std::vector<structure*>::iterator c_structure = localMinima.begin(); c_structure != localMinima.end(); c_structure++)
+	{
+
+		//std::cout << "going through the localMinima " << iii++ << " e: " << (*c_structure)->energy << std::endl;//remove later
+		std::string line = "energy: " + std::to_string((*c_structure)->energy);
+		for (int e = 0; e < (*c_structure)->set.size(); e++)
+		{
+			for (int a = 0; a < (*c_structure)->set[e].size(); a++)
+			{
+				//each atom
+				line += " " + (*c_structure)->elements[e] + " " + std::to_string((*c_structure)->set[e][a].x) + " " + std::to_string((*c_structure)->set[e][a].y) + " " + std::to_string((*c_structure)->set[e][a].z);
+			}
+		}
+		line += "\n";
+		outputString += line;
+	}
+
 	outputString += "all structures: energy,structure:\n";
 	//iii = 0;
 	for (std::vector<structure*>::iterator c_structure = structures.begin(); c_structure != structures.end(); c_structure++)
 	{
 		//for each structure
 		//std::cout << "going through the all structures " << iii++ << " e: " << (*c_structure)->energy << std::endl;//remove later
-		std::string line3 = "energy: " + std::to_string((*c_structure)->energy);
+		std::string line = "energy: " + std::to_string((*c_structure)->energy);
 		for (int e = 0; e < (*c_structure)->set.size(); e++)
 		{
 			for (int a = 0; a < (*c_structure)->set[e].size(); a++)
 			{
 				//each atom
-				line3 += " " + (*c_structure)->elements[e] + " " + std::to_string((*c_structure)->set[e][a].x) + " " + std::to_string((*c_structure)->set[e][a].y) + " " + std::to_string((*c_structure)->set[e][a].z);
-			}
-		}
-		line3 += "\n";
-		outputString += line3;
-	}
-	//this syntax should be removed just incase
-	/*
-	for (int i = 0; i < structures.size(); i++)
-	{
-		//for each structure
-		std::string line = "energy: " + std::to_string(structures[i]->energy);
-		for (int e = 0; e < structures[i]->set.size(); e++)
-		{
-			for (int a = 0; a < structures[i]->set[e].size(); a++)
-			{
-				//each atom
-				line += " " + structures[i]->elements[e] + " " + std::to_string(structures[i]->set[e][a].x) + " " + std::to_string(structures[i]->set[e][a].y) + " " + std::to_string(structures[i]->set[e][a].z);
+				line += " " + (*c_structure)->elements[e] + " " + std::to_string((*c_structure)->set[e][a].x) + " " + std::to_string((*c_structure)->set[e][a].y) + " " + std::to_string((*c_structure)->set[e][a].z);
 			}
 		}
 		line += "\n";
 		outputString += line;
 	}
-	*/
 	int numStructures = structures.size();
+	std::cout << "output filename: " << outputFileName + "_" + std::to_string(numStructures) + ".txt" << std::endl;
+	std::ofstream outputfile(outputFileName + "_" + std::to_string(numStructures) + ".txt");
+
+	// Write to the file
+	outputfile << outputString;
+
+	// Close the file
+	outputfile.close();
+
+	/*
+	Create an xyz file with all local minima structures, and also a corresponding file with energies and proportion from partition function;
+	*/
+	std::ofstream localMinimaEnergyFile(outputFileName + "_local_minima_energies"  + ".txt");
+	std::sort(localMinima.begin(), localMinima.end(),energyCompare);
+	
+	int lmi = 0;
+	for (std::vector<structure*>::iterator it = localMinima.begin(); it != localMinima.end(); it++)
+	{
+		//e^ (gme - lme)*(hartree to joule conversion)/k_b T
+		double partitionFunctionRatio = exp((globalMinimumEnergy - (*it)->energy) * (4.35974 / 1.380649) * (double)100000 / temperature);
+		localMinimaEnergyFile << "structure: " << std::to_string(++lmi) << "\nenergy (Hartree): " << (*it)->energy << "\nratio at " + std::to_string(temperature) + " K: " << partitionFunctionRatio << std::endl;
+	}
+
+	localMinimaEnergyFile.close();
+	writeToXyz(localMinima, outputFileName + "_" + "localMinima" + ".xyz");
+
+
+	//this syntax should be removed just incase
 	//delete everything except output string
 	if (DEBUG) std::cout << "cleaning memory " << std::endl;
 	for (int i = 0; i < structures.size(); i++)
@@ -2525,22 +3989,509 @@ void continueModifiedBasinHopping(std::string startFileName, int charge, int sta
 		delete structures[i];
 	}
 	//open a file and print the output
-	//num structures is current and total structures is from previous runs. i believe there is an error with this
-	std::ofstream outputfile(outputFileName + "_" + std::to_string(numStructures + totalStructures) + ".txt");
 	
+
+
+
+
+
+
+}
+
+void basinHoppingCriteria(std::string previousRun, char seedMode, std::vector<int> composition, std::vector<std::string> elements, double x, double y, double z, double rlimit, double percentChangeI, double percentChangeF, double RIDpercent, int charge, int state, char calculator, std::string method, std::string basis, int optimizationIterations, int SCFsteps, int HFsteps, double time, int localMinimaTrapping, int radialCriteriaPercent, std::string outputFileName, std::string taskName, double deltaEThr = 1, bool checkEnergy = false, bool optimizePositive = true, bool keepFiles = false, bool filterOff = false, std::string converge = "1.0e-6", int timeOutMinutes = -1, int timeOutMinutesSP = -1, bool covalentCriteriaMode = false, double covalentCriteriaPercent = 0, int covalentCriteriaLimit = 1000, int bondRequirement = 0, bool planar = false)
+{
+	double RIDthreshold = 0;
+	int energyCall = 0;
+	std::vector<structure*> structures = {};
+	//std::vector<std::set<int>> coordinationNumbers;
+	structure* gmeS = nullptr;//the global minima structure known
+	double globalMinimumEnergy = 0;//energy corresponding to gmeS
+	double globalMinimumTime = 0;
+
+	int totalStructuresSearchedAtGME = 0;
+
+	structure* ls = nullptr; //current/last structure explored
+	double lastEnergy = 0;//energy corresponding to ls
+
+	structure* cMinima;//current local minima since the last seed reset
+	double latestLowestEnergy;//energy corresponding to cminima
+	std::vector<double> lowMovementVecor;//corresponding to cminima
+	double cMinDeltaE;//delta E at cmin
+
+	int stepsSinceNew = 0;
+	
+	std::vector<structure*> localMinima = {};
+	int totalStructuresSearched = 0;
+
+	//not used in continue
+	structure* s = nullptr;
+	double seedEnergy = 0;
+	int ccSteps = 0;//current chain steps
+
+	int calculations = 0;
+	int step = 0;
+
+	std::vector<std::pair<int, bool>> symmetries = possibleSymmetry(composition, elements, rlimit, radialCriteriaPercent, 1, 10000);
+	int seedNo = 0;
+	if (previousRun != "")
+	{
+		if (STDOUT) std::cout << "continuing from previous file_: " << previousRun << std::endl;
+		energyCall = 1;
+		std::ifstream startFile(previousRun);
+		std::string inLine;
+		std::vector<int> composition;
+		std::vector<std::string> elements;
+		int stepsSinceNew = 0;
+		std::getline(startFile, inLine);// "Composition:\n";
+		std::getline(startFile, inLine);
+		std::pair< std::vector<int>, std::vector<std::string>> comp = getComposition(inLine);
+		int debugo = 0;
+		composition = comp.first;
+		elements = comp.second;
+		std::getline(startFile, inLine); //"threshold:\n";
+		std::getline(startFile, inLine);
+		//RIDthreshold = std::stoi(inLine);
+		std::getline(startFile, inLine);// best structure
+		std::getline(startFile, inLine);
+		gmeS = new structure(inLine, elements, composition);
+		globalMinimumEnergy = gmeS->energy;//a variable for monitoring the global minimum found
+		globalMinimumTime = 0;
+		std::getline(startFile, inLine);//# minutes searched prior
+		int priorEnd = 0;
+		for (int i = 0; i < inLine.size(); i++)
+		{
+			if (inLine[i] == ' ' && priorEnd == 0) priorEnd = i;
+		}
+		globalMinimumTime = std::stof(inLine.substr(0, priorEnd));
+		std::getline(startFile, inLine);//# minutes searched prior
+		priorEnd = 0;
+		for (int i = 0; i < inLine.size(); i++)
+		{
+			if (inLine[i] == ' ' && priorEnd == 0) priorEnd = i;
+		}
+		totalStructuresSearchedAtGME = std::stof(inLine.substr(0, priorEnd));
+		std::cout << "Current global minimum structure found after " << totalStructuresSearchedAtGME << " structures with energy " << globalMinimumEnergy << ": " << std::endl;
+		gmeS->print();
+		std::getline(startFile, inLine);//energy of best structure
+
+		for (int i = 0; i < composition.size(); i++) for (int j = 0; j < composition[i]; j++) std::getline(startFile, inLine);//element followed by coordinates
+		std::getline(startFile, inLine);// "last energy,structure:\n";
+		std::getline(startFile, inLine);
+		ls = new structure(inLine, elements, composition);
+		lastEnergy = ls->energy;
+		std::getline(startFile, inLine);//steps since new
+		std::getline(startFile, inLine);
+		stepsSinceNew = std::stoi(inLine);
+		std::getline(startFile, inLine);//recycles since new
+		std::getline(startFile, inLine);
+		//recyclesSinceNew = std::stoi(inLine);
+		std::getline(startFile, inLine);//uphill steps
+		std::getline(startFile, inLine);
+		//upHillSteps = std::stoi(inLine);
+		std::getline(startFile, inLine);//uphill steps
+		std::getline(startFile, inLine);
+		//optimizationsInCurrentSeed = std::stoi(inLine);
+		std::getline(startFile, inLine);
+		std::getline(startFile, inLine);
+		step = std::stoi(inLine);
+		std::getline(startFile, inLine);
+		std::getline(startFile, inLine);
+		ccSteps = std::stoi(inLine);
+		/*
+		Todo set steps since new
+		*/
+		std::getline(startFile, inLine);// "local minima energy,structure:\n";
+		localMinima = {};
+		cMinima = nullptr;
+		std::getline(startFile, inLine);
+		while (inLine[0] != 'a')
+		{
+			structure* next = new structure(inLine, elements, composition);
+			localMinima.push_back(next);
+			cMinima = next;//constantly reset until we get the actual last one
+
+			//load the next line. the reason this isn't done in the conditional is because we need to stop at a text line
+			std::getline(startFile, inLine);
+		}
+		//std::getline(startFile, line);// "all structures energy,structure:\n";// this should already be ignored
+		//get all the structures now
+		latestLowestEnergy = cMinima->energy;
+		while (std::getline(startFile, inLine))
+		{
+			structure* next = new structure(inLine, elements, composition);
+			structures.push_back(next);
+		}
+		totalStructuresSearched = structures.size();
+		// Close the file
+		startFile.close();
+	}
+	else {
+		RIDthreshold = threshold(RID, composition, elements, rlimit, rlimit, rlimit, 1, x, y, z, RIDpercent);
+		stepsSinceNew = 0;
+		structures = {};
+		localMinima = {};
+		totalStructuresSearched = structures.size();
+		do {
+			s = getSeedFromSymmetryMode(seedMode, composition, elements, rlimit, seedNo, symmetries);
+			while (!radialCriteria(*s, radialCriteriaPercent))
+			{
+				if (DEBUG) std::cout << "did not pass criteria (radial) in seed creation" << std::endl;
+				delete s;
+				s = getSeedFromSymmetryMode(seedMode, composition, elements, rlimit, seedNo, symmetries);
+
+			}
+		} while (!bondingRequirement(s, radialCriteriaPercent, bondRequirement));
+		energyCall = 0;
+		double timeLeftMinutes = (double)time * 60;
+
+		seedEnergy = energyCalculation(s, basis, method, charge, state, calculator, taskName, ++calculations, keepFiles, converge, timeLeftMinutes, timeOutMinutesSP);
+		gmeS = s;//the global minima structure known
+		globalMinimumEnergy = seedEnergy;//energy corresponding to gmeS
+		totalStructuresSearchedAtGME = 1;
+
+		ls = s; //current/last structure explored
+		lastEnergy = seedEnergy;//energy corresponding to ls
+
+		cMinima = s;//current local minima since the last seed reset
+		latestLowestEnergy = seedEnergy;//energy corresponding to cminima
+
+
+		ccSteps = 0;//current chain steps
+
+
+		step = 0;
+
+
+
+	}
+
+
+	cMinDeltaE = 0;//delta E at cmin
+
+	/*
+	Create seed
+	*/
+
+
+
+	//also initialize the energy changel
+
+	double deltaE = -0.1 * deltaEThr;
+	//change 10
+
+	auto start = std::chrono::high_resolution_clock::now();
+	auto stop = std::chrono::high_resolution_clock::now();
+	auto duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
+	double minutes = (double)duration.count() / (double)60;
+	if (DEBUG) std::cout << "minutes:  " << minutes << " ; time limit: " << double(time) * 60 - 30 << std::endl;
+	int maxint_ = 0;//remove later!
+
+	while (minutes < double(time) * 60 - 30)
+	{
+		ccSteps++;//current chain steps. gets reset every time a new seed is found, and is used to determine when to switch to blind gradient descent in the hybrid model. unfortunately it is distinct from all other step counters.
+		maxint_++;
+		if (DEBUG) std::cout << "MONITOR______________: " << " totalStructures: " << structures.size() << " total steps: " << maxint_ << std::endl;
+		if (DEBUG || STDOUT) std::cout << "step: " << step << " time: " << minutes / 60 << std::endl;
+		//step += 1;
+		structure* Xnew = nullptr;
+
+		if (STDOUT) std::cout << "Creating a new structure" << std::endl;
+		//COME BACK HEREEEEEEE
+		std::vector<double> movement = {};
+		for (int i = 0; i < ls->elements.size(); i++)
+		{
+			for (int j = 0; j < ls->set[i].size(); j++)
+			{
+				movement.push_back(x * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+				movement.push_back(y * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+				movement.push_back(z * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+			}
+		}
+		std::pair<structure*, std::vector<double>> XnewPair = createXnew(ls, percentChangeI, percentChangeF, step, x, y, z, movement, false);
+		if (covalentCriteriaMode)
+		{
+			int attempts = 0;
+			while ((!covalentCriteria(XnewPair.first, covalentCriteriaPercent) || !bondingRequirement(XnewPair.first, covalentCriteriaPercent, bondRequirement)) && attempts < covalentCriteriaLimit)
+			{
+				if(XnewPair.first->composition.size() > 0) delete XnewPair.first;//this if statement only prevents some memory error i do not understand
+				movement = {};
+				for (int i = 0; i < ls->elements.size(); i++)
+				{
+					for (int j = 0; j < ls->set[i].size(); j++)
+					{
+						movement.push_back(x * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+						movement.push_back(y * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+						movement.push_back(z * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+					}
+				}
+				std::pair<structure*, std::vector<double>> XnewPair = createXnew(ls, percentChangeI, percentChangeF, step, x, y, z, movement, false);
+				attempts++;
+			}
+			if (attempts >= covalentCriteriaLimit)
+			{
+				std::cout << "BGD algorithm trapped by covalent criteria. Returning to LLM with minor inefficency" << std::endl;
+				//group theory gradient is stuck, return to the last local minima
+				XnewPair = std::pair<structure*, std::vector<double>>(cMinima, lowMovementVecor);
+				XnewPair.first->energy = latestLowestEnergy;
+
+			}
+		}
+		Xnew = XnewPair.first;
+
+		structures.push_back(Xnew);
+		if (STDOUT)
+		{
+			std::cout << "New structure before optimization:" << std::endl;
+			Xnew->print();
+		}
+
+
+		bool optimize = true;
+		if (checkEnergy)
+		{
+			//prevent optimization on terrible structures
+			double timeLeftMinutes = (double)time * 60 - minutes;
+
+			double tempEnergy = energyCalculation(Xnew, basis, method, charge, state, calculator, taskName, ++calculations, keepFiles, converge, timeLeftMinutes, timeOutMinutesSP);
+			if (!optimizePositive) {
+				if (tempEnergy < 0)
+				{
+					optimize = true;
+				}
+				else {
+					optimize = false;
+				}
+			}
+			Xnew->energy = tempEnergy;
+		}
+		std::cout << "to here? 3" << std::endl;
+		if (optimizationIterations > 0 && optimize) {
+			if (STDOUT) std::cout << "optimizing current new structure" << std::endl;
+
+			std::string cmethod = method;
+			stop = std::chrono::high_resolution_clock::now();
+			duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
+			minutes = (double)duration.count();
+			double timeLeftMinutes = (double)time * 60 - minutes;
+
+			structure* tempXnew = optimizationCalculation(calculator, Xnew, ++calculations, taskName, optimizationIterations, SCFsteps, x, y, z, movement, structures, basis, cmethod, charge, state, keepFiles, converge, timeLeftMinutes, timeOutMinutes);
+			if (tempXnew == nullptr)
+			{
+				if (!checkEnergy) Xnew->energy = DBL_MAX;//as of now energy is not taken from a failed optimization, the failed optimization structure is also not used but in future versions this will be implemented. so the energy should be set to double max for the failure, therefore with check energy turned on the algorithm will be more proficient
+			}
+			else {
+				Xnew = tempXnew;
+				structures.push_back(Xnew);
+
+			}
+
+		}
+
+		std::cout << "to here? 4" << std::endl;
+		if (DEBUG) std::cout << "calling energy of Xnew " << std::endl;
+		double newEnergy = Xnew->energy;//energy is now taken from the optimizers
+			//energyCalculation(Xnew, basis, method, charge, state, calculator, taskName, energyCall, keepFiles);
+		if (DEBUG) std::cout << "Xnew energy: " << newEnergy << std::endl;
+		if (STDOUT) std::cout << "New structure energy: " << newEnergy << std::endl;
+		if (STDOUT) Xnew->printZmatrix();
+
+		totalStructuresSearched += 1;//only add 1 as we only checked the optimized energy, not the xnew energy in that case
+		if (globalMinimumEnergy > newEnergy)
+		{
+			globalMinimumEnergy = newEnergy;
+			globalMinimumTime = (double)duration.count();
+			gmeS = Xnew;
+			totalStructuresSearchedAtGME = totalStructuresSearched;
+		}
+
+		Xnew->energy = newEnergy;
+
+		//Checking criteria
+		if (newEnergy < lastEnergy || double(rand())/double(RAND_MAX) < exp((lastEnergy - newEnergy)/deltaEThr))
+		{
+			if (newEnergy < lastEnergy) {
+				stepsSinceNew = 0;
+				if (newEnergy < latestLowestEnergy)
+				{
+					latestLowestEnergy = newEnergy;
+
+					cMinima = Xnew;
+					lowMovementVecor = movement;
+					cMinDeltaE = newEnergy - lastEnergy;
+				}
+			}
+			//only accept during these criteria
+			ls = Xnew;
+			deltaE = newEnergy - lastEnergy;
+			lastEnergy = newEnergy;
+			
+		}
+		else
+		{
+			stepsSinceNew++;
+		}
+		
+		step++;
+
+
+
+
+		if (STDOUT) {
+			std::cout << "CYCLE END: Current global minima energy, time,  and structure: " << globalMinimumEnergy << " " << globalMinimumTime << std::endl;
+			gmeS->print();
+			gmeS->printZmatrix();
+		}
+
+
+
+		stop = std::chrono::high_resolution_clock::now();
+		duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
+		minutes = (double)duration.count();
+	}
+
+	localMinima.push_back(cMinima);
+
+
+
+	if (DEBUG || STDOUT) std::cout << "printing results " << std::endl;
+	gmeS->writeToXyz(outputFileName + ".xyz");
+	//gmeS->writeToObj(outputFileName + ".obj");
+	/*
+	print all structures
+	*/
+	std::string outputString = "";
+	//add composition
+	outputString += "Composition:\n";
+	for (int i = 0; i < composition.size(); i++)
+	{
+		outputString += elements[i] + std::to_string(composition[i]);
+	}
+	outputString += "\n";
+
+	//rid threshold
+	outputString += "RID threshold:\n";
+	outputString += std::to_string(0) + "\n";
+	//add the Global minima structure
+	outputString += "Best structure:\n";
+	std::string line = "energy: " + std::to_string((gmeS)->energy);
+	for (int e = 0; e < (gmeS)->set.size(); e++)
+	{
+		for (int a = 0; a < (gmeS)->set[e].size(); a++)
+		{
+			//each atom
+			line += " " + (gmeS)->elements[e] + " " + std::to_string((gmeS)->set[e][a].x) + " " + std::to_string((gmeS)->set[e][a].y) + " " + std::to_string((gmeS)->set[e][a].z);
+		}
+	}
+	line += "\n";
+	outputString += line;
+
+	std::string gline = std::to_string((int)globalMinimumTime) + " minutes prior\n" + std::to_string(totalStructuresSearchedAtGME) + " structures searched prior" + "\n" + "Energy: " + std::to_string(globalMinimumEnergy) + " \n";
+	int zitt = 0;
+	gmeS->makeZmatrix();
+	for (int e = 0; e < gmeS->set.size(); e++)
+	{
+		for (int a = 0; a < gmeS->set[e].size(); a++)
+		{
+			//each atom
+			gline += " " + gmeS->elements[e] + " " + std::to_string(gmeS->zmatrix[zitt][0]) + " " + std::to_string(gmeS->zmatrix[zitt][1]) + " " + std::to_string(gmeS->zmatrix[zitt][2]) + "\n";
+			zitt++;
+		}
+	}
+	/*
+	for (int e = 0; e < gmeS->set.size(); e++)
+	{
+		for (int a = 0; a < gmeS->set[e].size(); a++)
+		{
+			//each atom
+			gline += " " + gmeS->elements[e] + " " + std::to_string(gmeS->set[e][a].x) + " " + std::to_string(gmeS->set[e][a].y) + " " + std::to_string(gmeS->set[e][a].z) + "\n";
+		}
+	}*/
+
+	outputString += gline;
+	//add the last accepted structure
+	outputString += "last energy,structure:\n";
+	line = std::to_string(s->energy);
+	for (int e = 0; e < s->set.size(); e++)
+	{
+		for (int a = 0; a < s->set[e].size(); a++)
+		{
+			//each atom
+			line += " " + s->elements[e] + " " + std::to_string(s->set[e][a].x) + " " + std::to_string(s->set[e][a].y) + " " + std::to_string(s->set[e][a].z);
+		}
+	}
+	line += "\n";
+	outputString += line;
+	//add the most recent steps since new
+	outputString += "steps since new:\n";
+	outputString += std::to_string(stepsSinceNew) + "\n";
+	outputString += "recycles since new:\n";
+	outputString += std::to_string(0) + "\n";
+	outputString += "uphill steps since new:\n";
+	outputString += std::to_string(0) + "\n";
+	outputString += "optimizations in current seed:\n";
+	outputString += std::to_string(0) + "\n";
+	outputString += "step:\n";
+	outputString += std::to_string(step) + "\n";
+	outputString += "ccStep:\n";
+	outputString += std::to_string(ccSteps) + "\n";
+	//structures with energies
+	outputString += "local minima only: energy,structure:\n";
+
+	//int iii = 0;
+	std::cout << "local minima size: " << localMinima.size() << std::endl;
+	for (std::vector<structure*>::iterator c_structure = localMinima.begin(); c_structure != localMinima.end(); c_structure++)
+	{
+
+		//std::cout << "going through the localMinima " << iii++ << " e: " << (*c_structure)->energy << std::endl;//remove later
+		std::string line = "energy: " + std::to_string((*c_structure)->energy);
+		for (int e = 0; e < (*c_structure)->set.size(); e++)
+		{
+			for (int a = 0; a < (*c_structure)->set[e].size(); a++)
+			{
+				//each atom
+				line += " " + (*c_structure)->elements[e] + " " + std::to_string((*c_structure)->set[e][a].x) + " " + std::to_string((*c_structure)->set[e][a].y) + " " + std::to_string((*c_structure)->set[e][a].z);
+			}
+		}
+		line += "\n";
+		outputString += line;
+	}
+
+	outputString += "all structures: energy,structure:\n";
+	//iii = 0;
+	for (std::vector<structure*>::iterator c_structure = structures.begin(); c_structure != structures.end(); c_structure++)
+	{
+		//for each structure
+		//std::cout << "going through the all structures " << iii++ << " e: " << (*c_structure)->energy << std::endl;//remove later
+		std::string line = "energy: " + std::to_string((*c_structure)->energy);
+		for (int e = 0; e < (*c_structure)->set.size(); e++)
+		{
+			for (int a = 0; a < (*c_structure)->set[e].size(); a++)
+			{
+				//each atom
+				line += " " + (*c_structure)->elements[e] + " " + std::to_string((*c_structure)->set[e][a].x) + " " + std::to_string((*c_structure)->set[e][a].y) + " " + std::to_string((*c_structure)->set[e][a].z);
+			}
+		}
+		line += "\n";
+		outputString += line;
+	}
+	int numStructures = structures.size();
+	std::cout << "output filename: " << outputFileName + "_" + std::to_string(numStructures) + ".txt" << std::endl;
+	std::ofstream outputfile(outputFileName + "_" + std::to_string(numStructures) + ".txt");
+
 	// Write to the file
 	outputfile << outputString;
 
 	// Close the file
 	outputfile.close();
 
-
-
-
-
-
-
-
+	//this syntax should be removed just incase
+	//delete everything except output string
+	if (DEBUG) std::cout << "cleaning memory " << std::endl;
+	for (int i = 0; i < structures.size(); i++)
+	{
+		delete structures[i];
+	}
+	//open a file and print the output
 
 
 
@@ -2550,114 +4501,684 @@ void continueModifiedBasinHopping(std::string startFileName, int charge, int sta
 
 }
 
-structure* optimize(structure& s)
+void basinHopping(std::string previousRun, char seedMode, std::vector<int> composition, std::vector<std::string> elements, double x, double y, double z, double rlimit, double percentChangeI, double percentChangeF, double RIDpercent, int charge, int state, char calculator, std::string method, std::string basis, int optimizationIterations, int SCFsteps, int HFsteps, double time, int localMinimaTrapping, std::string outputFileName, std::string taskName, double deltaEThr = 1, bool checkEnergy = false, bool optimizePositive = true, bool keepFiles = false, std::string converge = "1.0e-6", int timeOutMinutes = -1, int timeOutMinutesSP = -1, bool planar = false)
 {
+	double RIDthreshold = 0;
+	int energyCall = 0;
+	std::vector<structure*> structures = {};
+	//std::vector<std::set<int>> coordinationNumbers;
+	structure* gmeS = nullptr;//the global minima structure known
+	double globalMinimumEnergy = 0;//energy corresponding to gmeS
+	double globalMinimumTime = 0;
+
+	int totalStructuresSearchedAtGME = 0;
+
+	structure* ls = nullptr; //current/last structure explored
+	double lastEnergy = 0;//energy corresponding to ls
+
+	structure* cMinima;//current local minima since the last seed reset
+	double latestLowestEnergy;//energy corresponding to cminima
+	std::vector<double> lowMovementVecor;//corresponding to cminima
+	double cMinDeltaE;//delta E at cmin
+
+	int stepsSinceNew = 0;
+
+	std::vector<structure*> localMinima = {};
+	int totalStructuresSearched = 0;
+
+	//not used in continue
+	structure* s = nullptr;
+	double seedEnergy = 0;
+	int ccSteps = 0;//current chain steps
+
+	int calculations = 0;
+	int step = 0;
+
+	std::vector<std::pair<int, bool>> symmetries = possibleSymmetry(composition, elements, rlimit,20, 1, 10000);
+	int seedNo = 0;
+	if (previousRun != "")
+	{
+		if (STDOUT) std::cout << "continuing from previous file_: " << previousRun << std::endl;
+		energyCall = 1;
+		std::ifstream startFile(previousRun);
+		std::string inLine;
+		std::vector<int> composition;
+		std::vector<std::string> elements;
+		int stepsSinceNew = 0;
+		std::getline(startFile, inLine);// "Composition:\n";
+		std::getline(startFile, inLine);
+		std::pair< std::vector<int>, std::vector<std::string>> comp = getComposition(inLine);
+		int debugo = 0;
+		composition = comp.first;
+		elements = comp.second;
+		std::getline(startFile, inLine); //"threshold:\n";
+		std::getline(startFile, inLine);
+		//RIDthreshold = std::stoi(inLine);
+		std::getline(startFile, inLine);// best structure
+		std::getline(startFile, inLine);
+		gmeS = new structure(inLine, elements, composition);
+		globalMinimumEnergy = gmeS->energy;//a variable for monitoring the global minimum found
+		globalMinimumTime = 0;
+		std::getline(startFile, inLine);//# minutes searched prior
+		int priorEnd = 0;
+		for (int i = 0; i < inLine.size(); i++)
+		{
+			if (inLine[i] == ' ' && priorEnd == 0) priorEnd = i;
+		}
+		globalMinimumTime = std::stof(inLine.substr(0, priorEnd));
+		std::getline(startFile, inLine);//# minutes searched prior
+		priorEnd = 0;
+		for (int i = 0; i < inLine.size(); i++)
+		{
+			if (inLine[i] == ' ' && priorEnd == 0) priorEnd = i;
+		}
+		totalStructuresSearchedAtGME = std::stof(inLine.substr(0, priorEnd));
+		std::cout << "Current global minimum structure found after " << totalStructuresSearchedAtGME << " structures with energy " << globalMinimumEnergy << ": " << std::endl;
+		gmeS->print();
+		std::getline(startFile, inLine);//energy of best structure
+
+		for (int i = 0; i < composition.size(); i++) for (int j = 0; j < composition[i]; j++) std::getline(startFile, inLine);//element followed by coordinates
+		std::getline(startFile, inLine);// "last energy,structure:\n";
+		std::getline(startFile, inLine);
+		ls = new structure(inLine, elements, composition);
+		lastEnergy = ls->energy;
+		std::getline(startFile, inLine);//steps since new
+		std::getline(startFile, inLine);
+		stepsSinceNew = std::stoi(inLine);
+		std::getline(startFile, inLine);//recycles since new
+		std::getline(startFile, inLine);
+		//recyclesSinceNew = std::stoi(inLine);
+		std::getline(startFile, inLine);//uphill steps
+		std::getline(startFile, inLine);
+		//upHillSteps = std::stoi(inLine);
+		std::getline(startFile, inLine);//uphill steps
+		std::getline(startFile, inLine);
+		//optimizationsInCurrentSeed = std::stoi(inLine);
+		std::getline(startFile, inLine);
+		std::getline(startFile, inLine);
+		step = std::stoi(inLine);
+		std::getline(startFile, inLine);
+		std::getline(startFile, inLine);
+		ccSteps = std::stoi(inLine);
+		/*
+		Todo set steps since new
+		*/
+		std::getline(startFile, inLine);// "local minima energy,structure:\n";
+		localMinima = {};
+		cMinima = nullptr;
+		std::getline(startFile, inLine);
+		while (inLine[0] != 'a')
+		{
+			structure* next = new structure(inLine, elements, composition);
+			localMinima.push_back(next);
+			cMinima = next;//constantly reset until we get the actual last one
+
+			//load the next line. the reason this isn't done in the conditional is because we need to stop at a text line
+			std::getline(startFile, inLine);
+		}
+		//std::getline(startFile, line);// "all structures energy,structure:\n";// this should already be ignored
+		//get all the structures now
+		latestLowestEnergy = cMinima->energy;
+		while (std::getline(startFile, inLine))
+		{
+			structure* next = new structure(inLine, elements, composition);
+			structures.push_back(next);
+		}
+		totalStructuresSearched = structures.size();
+		// Close the file
+		startFile.close();
+	}
+	else {
+		RIDthreshold = threshold(RID, composition, elements, rlimit, rlimit, rlimit, 1, x, y, z, RIDpercent);
+		stepsSinceNew = 0;
+		structures = {};
+		localMinima = {};
+		totalStructuresSearched = structures.size();
+		s = getSeedFromSymmetryMode(seedMode, composition, elements, rlimit, seedNo, symmetries);
+			
+		energyCall = 0;
+		double timeLeftMinutes = (double)time * 60;
+
+		seedEnergy = energyCalculation(s, basis, method, charge, state, calculator, taskName, ++calculations, keepFiles, converge, timeLeftMinutes, timeOutMinutesSP);
+		gmeS = s;//the global minima structure known
+		globalMinimumEnergy = seedEnergy;//energy corresponding to gmeS
+		totalStructuresSearchedAtGME = 1;
+
+		ls = s; //current/last structure explored
+		lastEnergy = seedEnergy;//energy corresponding to ls
+
+		cMinima = s;//current local minima since the last seed reset
+		latestLowestEnergy = seedEnergy;//energy corresponding to cminima
+
+
+		ccSteps = 0;//current chain steps
+
+
+		step = 0;
+
+
+
+	}
+
+
+	cMinDeltaE = 0;//delta E at cmin
+
 	/*
-	Todo
+	Create seed
 	*/
-	//thsi causes a crash dont use!
-	return nullptr;
+
+
+
+	//also initialize the energy changel
+
+	double deltaE = -0.1 * deltaEThr;
+	//change 10
+
+	auto start = std::chrono::high_resolution_clock::now();
+	auto stop = std::chrono::high_resolution_clock::now();
+	auto duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
+	double minutes = (double)duration.count() / (double)60;
+	if (DEBUG) std::cout << "minutes:  " << minutes << " ; time limit: " << double(time) * 60 - 30 << std::endl;
+	int maxint_ = 0;//remove later!
+
+	while (minutes < double(time) * 60 - 30)
+	{
+		ccSteps++;//current chain steps. gets reset every time a new seed is found, and is used to determine when to switch to blind gradient descent in the hybrid model. unfortunately it is distinct from all other step counters.
+		maxint_++;
+		if (DEBUG) std::cout << "MONITOR______________: " << " totalStructures: " << structures.size() << " total steps: " << maxint_ << std::endl;
+		if (DEBUG || STDOUT) std::cout << "step: " << step << " time: " << minutes / 60 << std::endl;
+		//step += 1;
+		structure* Xnew = nullptr;
+
+		if (STDOUT) std::cout << "Creating a new structure" << std::endl;
+		//COME BACK HEREEEEEEE
+		std::vector<double> movement = {};
+		for (int i = 0; i < ls->elements.size(); i++)
+		{
+			for (int j = 0; j < ls->set[i].size(); j++)
+			{
+				movement.push_back(x * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+				movement.push_back(y * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+				movement.push_back(z * (2.0 * (rand() % RAND_MAX) / RAND_MAX - 1));
+			}
+		}
+		std::pair<structure*, std::vector<double>> XnewPair = createXnew(ls, percentChangeI, percentChangeF, step, x, y, z, movement, false);
+		Xnew = XnewPair.first;
+
+		structures.push_back(Xnew);
+		if (STDOUT)
+		{
+			std::cout << "New structure before optimization:" << std::endl;
+			Xnew->print();
+		}
+
+
+		bool optimize = true;
+		if (checkEnergy)
+		{
+			//prevent optimization on terrible structures
+			double timeLeftMinutes = (double)time * 60 - minutes;
+
+			double tempEnergy = energyCalculation(Xnew, basis, method, charge, state, calculator, taskName, ++calculations, keepFiles, converge, timeLeftMinutes, timeOutMinutesSP);
+			if (!optimizePositive) {
+				if (tempEnergy < 0)
+				{
+					optimize = true;
+				}
+				else {
+					optimize = false;
+				}
+			}
+			Xnew->energy = tempEnergy;
+		}
+		if (optimizationIterations > 0 && optimize) {
+			if (STDOUT) std::cout << "optimizing current new structure" << std::endl;
+
+			std::string cmethod = method;
+			stop = std::chrono::high_resolution_clock::now();
+			duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
+			minutes = (double)duration.count();
+			double timeLeftMinutes = (double)time * 60 - minutes;
+
+			structure* tempXnew = optimizationCalculation(calculator, Xnew, ++calculations, taskName, optimizationIterations, SCFsteps, x, y, z, movement, structures, basis, cmethod, charge, state, keepFiles, converge, timeLeftMinutes, timeOutMinutes);
+			if (tempXnew == nullptr)
+			{
+				if (!checkEnergy) Xnew->energy = DBL_MAX;//as of now energy is not taken from a failed optimization, the failed optimization structure is also not used but in future versions this will be implemented. so the energy should be set to double max for the failure, therefore with check energy turned on the algorithm will be more proficient
+			}
+			else {
+				Xnew = tempXnew;
+				structures.push_back(Xnew);
+
+			}
+
+		}
+
+
+		if (DEBUG) std::cout << "calling energy of Xnew " << std::endl;
+		double newEnergy = Xnew->energy;//energy is now taken from the optimizers
+			//energyCalculation(Xnew, basis, method, charge, state, calculator, taskName, energyCall, keepFiles);
+		if (DEBUG) std::cout << "Xnew energy: " << newEnergy << std::endl;
+		if (STDOUT) std::cout << "New structure energy: " << newEnergy << std::endl;
+		if (STDOUT) Xnew->printZmatrix();
+
+		totalStructuresSearched += 1;//only add 1 as we only checked the optimized energy, not the xnew energy in that case
+		if (globalMinimumEnergy > newEnergy)
+		{
+			globalMinimumEnergy = newEnergy;
+			globalMinimumTime = (double)duration.count();
+			gmeS = Xnew;
+			totalStructuresSearchedAtGME = totalStructuresSearched;
+		}
+
+		Xnew->energy = newEnergy;
+
+		//Checking criteria
+		if (newEnergy < lastEnergy || double(rand()) / double(RAND_MAX) < exp((lastEnergy - newEnergy) / deltaEThr))
+		{
+			if (newEnergy < lastEnergy) {
+				stepsSinceNew = 0;
+				if (newEnergy < latestLowestEnergy)
+				{
+					latestLowestEnergy = newEnergy;
+
+					cMinima = Xnew;
+					lowMovementVecor = movement;
+					cMinDeltaE = newEnergy - lastEnergy;
+				}
+			}
+			//only accept during these criteria
+			ls = Xnew;
+			deltaE = newEnergy - lastEnergy;
+			lastEnergy = newEnergy;
+
+		}
+		else
+		{
+			stepsSinceNew++;
+		}
+
+		step++;
+
+
+
+
+		if (STDOUT) {
+			std::cout << "CYCLE END: Current global minima energy, time,  and structure: " << globalMinimumEnergy << " " << globalMinimumTime << std::endl;
+			gmeS->print();
+			gmeS->printZmatrix();
+		}
+
+
+
+		stop = std::chrono::high_resolution_clock::now();
+		duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
+		minutes = (double)duration.count();
+	}
+
+	localMinima.push_back(cMinima);
+
+
+
+	if (DEBUG || STDOUT) std::cout << "printing results " << std::endl;
+	gmeS->writeToXyz(outputFileName + ".xyz");
+	//gmeS->writeToObj(outputFileName + ".obj");
+	/*
+	print all structures
+	*/
+	std::string outputString = "";
+	//add composition
+	outputString += "Composition:\n";
+	for (int i = 0; i < composition.size(); i++)
+	{
+		outputString += elements[i] + std::to_string(composition[i]);
+	}
+	outputString += "\n";
+
+	//rid threshold
+	outputString += "RID threshold:\n";
+	outputString += std::to_string(0) + "\n";
+	//add the Global minima structure
+	outputString += "Best structure:\n";
+	std::string line = "energy: " + std::to_string((gmeS)->energy);
+	for (int e = 0; e < (gmeS)->set.size(); e++)
+	{
+		for (int a = 0; a < (gmeS)->set[e].size(); a++)
+		{
+			//each atom
+			line += " " + (gmeS)->elements[e] + " " + std::to_string((gmeS)->set[e][a].x) + " " + std::to_string((gmeS)->set[e][a].y) + " " + std::to_string((gmeS)->set[e][a].z);
+		}
+	}
+	line += "\n";
+	outputString += line;
+
+	std::string gline = std::to_string((int)globalMinimumTime) + " minutes prior\n" + std::to_string(totalStructuresSearchedAtGME) + " structures searched prior" + "\n" + "Energy: " + std::to_string(globalMinimumEnergy) + " \n";
+	int zitt = 0;
+	gmeS->makeZmatrix();
+	for (int e = 0; e < gmeS->set.size(); e++)
+	{
+		for (int a = 0; a < gmeS->set[e].size(); a++)
+		{
+			//each atom
+			gline += " " + gmeS->elements[e] + " " + std::to_string(gmeS->zmatrix[zitt][0]) + " " + std::to_string(gmeS->zmatrix[zitt][1]) + " " + std::to_string(gmeS->zmatrix[zitt][2]) + "\n";
+			zitt++;
+		}
+	}
+	/*
+	for (int e = 0; e < gmeS->set.size(); e++)
+	{
+		for (int a = 0; a < gmeS->set[e].size(); a++)
+		{
+			//each atom
+			gline += " " + gmeS->elements[e] + " " + std::to_string(gmeS->set[e][a].x) + " " + std::to_string(gmeS->set[e][a].y) + " " + std::to_string(gmeS->set[e][a].z) + "\n";
+		}
+	}*/
+
+	outputString += gline;
+	//add the last accepted structure
+	outputString += "last energy,structure:\n";
+	line = std::to_string(s->energy);
+	for (int e = 0; e < s->set.size(); e++)
+	{
+		for (int a = 0; a < s->set[e].size(); a++)
+		{
+			//each atom
+			line += " " + s->elements[e] + " " + std::to_string(s->set[e][a].x) + " " + std::to_string(s->set[e][a].y) + " " + std::to_string(s->set[e][a].z);
+		}
+	}
+	line += "\n";
+	outputString += line;
+	//add the most recent steps since new
+	outputString += "steps since new:\n";
+	outputString += std::to_string(stepsSinceNew) + "\n";
+	outputString += "recycles since new:\n";
+	outputString += std::to_string(0) + "\n";
+	outputString += "uphill steps since new:\n";
+	outputString += std::to_string(0) + "\n";
+	outputString += "optimizations in current seed:\n";
+	outputString += std::to_string(0) + "\n";
+	outputString += "step:\n";
+	outputString += std::to_string(step) + "\n";
+	outputString += "ccStep:\n";
+	outputString += std::to_string(ccSteps) + "\n";
+	//structures with energies
+	outputString += "local minima only: energy,structure:\n";
+
+	//int iii = 0;
+	std::cout << "local minima size: " << localMinima.size() << std::endl;
+	for (std::vector<structure*>::iterator c_structure = localMinima.begin(); c_structure != localMinima.end(); c_structure++)
+	{
+
+		//std::cout << "going through the localMinima " << iii++ << " e: " << (*c_structure)->energy << std::endl;//remove later
+		std::string line = "energy: " + std::to_string((*c_structure)->energy);
+		for (int e = 0; e < (*c_structure)->set.size(); e++)
+		{
+			for (int a = 0; a < (*c_structure)->set[e].size(); a++)
+			{
+				//each atom
+				line += " " + (*c_structure)->elements[e] + " " + std::to_string((*c_structure)->set[e][a].x) + " " + std::to_string((*c_structure)->set[e][a].y) + " " + std::to_string((*c_structure)->set[e][a].z);
+			}
+		}
+		line += "\n";
+		outputString += line;
+	}
+
+	outputString += "all structures: energy,structure:\n";
+	//iii = 0;
+	for (std::vector<structure*>::iterator c_structure = structures.begin(); c_structure != structures.end(); c_structure++)
+	{
+		//for each structure
+		//std::cout << "going through the all structures " << iii++ << " e: " << (*c_structure)->energy << std::endl;//remove later
+		std::string line = "energy: " + std::to_string((*c_structure)->energy);
+		for (int e = 0; e < (*c_structure)->set.size(); e++)
+		{
+			for (int a = 0; a < (*c_structure)->set[e].size(); a++)
+			{
+				//each atom
+				line += " " + (*c_structure)->elements[e] + " " + std::to_string((*c_structure)->set[e][a].x) + " " + std::to_string((*c_structure)->set[e][a].y) + " " + std::to_string((*c_structure)->set[e][a].z);
+			}
+		}
+		line += "\n";
+		outputString += line;
+	}
+	int numStructures = structures.size();
+	std::cout << "output filename: " << outputFileName + "_" + std::to_string(numStructures) + ".txt" << std::endl;
+	std::ofstream outputfile(outputFileName + "_" + std::to_string(numStructures) + ".txt");
+
+	// Write to the file
+	outputfile << outputString;
+
+	// Close the file
+	outputfile.close();
+
+	//this syntax should be removed just incase
+	//delete everything except output string
+	if (DEBUG) std::cout << "cleaning memory " << std::endl;
+	for (int i = 0; i < structures.size(); i++)
+	{
+		delete structures[i];
+	}
+	//open a file and print the output
+
+
+
+
+
+
+
 }
 
 //seed structure
 
 int main(int argv, char *argc[])
 {
-	/*
-	double RIDthreshold = threshold(RID, { 3 }, 2, 2, 2, 1, 0, 0.2, 0.2, 0.2);
-	return 1;
-	std::vector<std::vector<atom>> setS = { std::vector<atom>{atom(0,0,0.205569),atom(0.588472,0.088472,0.5),atom(0.326759,0.461247,0.5)},std::vector<atom>{atom(0.182971 ,	0.682971 ,	0)}};
-	std::vector<std::string> elementsE = {"B","Pr"};
-	structure s = structure(setS,  elementsE);
-	for (int i = 0; i < 100; i++)
-	{
-		if (radialCriteria(s, i)) std::cout << i << " percent passed" << std::endl;
-		else std::cout << i << " percent FAILED" << std::endl;
-	}
-	return 0;
-	*/
-	/*
 	
-	*/
-
-	srand(time(NULL));
-	/*
-	std::vector<int> compositionB = { 3 };
-	std::vector<std::string> elementsB = { "B" };
-	structure s(5, 5, 0, compositionB, elementsB);
-
-	structure* s2 = optimizationGaussian(s, 1, "boron", "6-31+g(d,p)", "HF", 3, -1, 1,129);
-	std::cout << "made it to tge print" << std::endl;
-	s2->print();
-	delete s2;
-	//writeToGuassian(s, "boron energy", "boron_opto.com", "6-31+g(d,p)", "b3lyp", 2,-1,1,129);
-
-
-	//energyGuassian(s, 1, "boronTest", "b3lyp/6-31+g(d,p)", 0, 2);
-	return 1;
-	std::vector<int> compositionC = { 1,4 };
-	std::vector<std::string> elementsE = { "C","H" };
-
-	//structure sss(8, 8, 8, compositionC, elementsE);
-	//structure ss2(8, 8, 8, compositionC, elementsE);
-	//RID(sss, ss2);
-	//structure ss3(8, 8, 8, compositionC, elementsE);
-	//RID(ss3, ss2);
-	//std::cout << "starting tests" << std::endl;
-	//scoreAtoms(sss);
-	//basinHoppingEnergy(sss, 1000, "no", 20, 20, 20);
-	//std::cout << "starting tests pass?" << std::endl;
+	srand(time(0));
+	//std::vector<structure*> sfxyz = structuresFromXYZ("testSeeds.xyz");
+	//for (std::vector<structure*>::iterator it = sfxyz.begin(); it != sfxyz.end(); it++) std::cout << radialCriteria(**it, 20);
 	//return 0;
-	//
-	//startModifiedBasinHopping(5, 5, 5,10,20, compositionC, elementsE, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, 100000, 1, 100, 30, "newStart", "testingOut", 20, 20, 20);
-	//continueModifiedBasinHopping("newStart_51.txt", basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, 10, 20, 100000, 1, 100, 30, "newStart_cont", "testingOut", 20, 20, 20);
+	/*
+	std::vector<atom> set;
+	set.push_back(atom(0.690242, 3.18115, -0.17103));
+	set.push_back(atom(-2.91749, -1.44376, -0.17103));
+	set.push_back(atom(-2.00214, -2.56664, -0.17103));
+	set.push_back(atom(-0.690242, -3.18115, -0.17103));
+	set.push_back(atom(0.758364, -3.16561, -0.17103));
+	set.push_back(atom(2.05677, -2.52307, -0.17103));
+	set.push_back(atom(2.9478, -1.38081, -0.17103));
+
+	structure pen = structure({ set }, { "B" });
+	radialCriteria(pen, 20);
+	*/
+	//std::vector<atom> set = partialSymmetrySet(8, 5, 0, 5, 1);
+	
+	/*
+	std::vector<bool*> ce = alignedEnumeration(7, 3);
+	for (int i = 0; i < ce.size(); i++) {
+		for (int j = 0; j < 7; j++) std::cout << ce[i][j] << " ";
+		std::cout << std::endl;
+	}
+	std::cout << std::endl;
+	std::vector<bool*> ce2 = enumeration(7, 3);
+	for (int i = 0; i < ce2.size(); i++) {
+		for (int j = 0; j < 7; j++) std::cout << ce2[i][j] << " ";
+		std::cout << std::endl;
+	}*/
+
+	///*
+	//CHECK SEED GENERATION
+	std::vector<structure*> sps = getSeeds({ 7 }, { "B" }, 2.5, 20, 1, 10000,false, false, true, false, 1);
+	//std::vector<structure*> sps = seedsWithPartialSymmetry(false,true,false, 1.3, { 1,9 }, {"Ag","B"}, 4.5, 20, 1, 10000);
+	writeToXyz(sps, "testSeeds.xyz");
+	std::cout << sps.size() << std::endl;
+	return 0;
+
+	//*/
+
+
+
+
+	/*
+	std::vector<std::pair<int, bool>> as = possibleSymmetry({ 7 }, { "B" }, 3.5, 20, 2, 100,10000);
+	for (std::vector<std::pair<int, bool>>::iterator it = as.begin(); it != as.end(); it++) std::cout << it->first << "," << it->second << std::endl;
+	return 0;
+	*/
+
+	/*
+	std::vector<std::string> elementsEE = { "La","B" };
+	std::vector<int> compositionCC = { 2,8 };
+
+	
+	srand(time(0));
+	for (int i = 0; i < 1; i++)
+	{
+
+		double rad = 3.0;
+		int rcp = 20;
+		int bondNum = 2;
+
+		std::cout << "attempt " << i << std::endl;
+		structure* seed;
+		do {
+			seed = seedWithSymmetry(8,1, compositionCC, elementsEE, rad);
+
+			while (!radialCriteria(*seed, rcp))
+			{
+				delete seed;
+				seed = seedWithSymmetry(8, 1, compositionCC, elementsEE, rad);
+			}
+		} while (!bondingRequirement(seed, rcp, bondNum));
+		std::cout << "accepted" << std::endl;
+		std::cout << bondingRequirement(seed, rcp, bondNum) << std::endl;
+		seed->writeToXyz("checkLa2B8_" + std::to_string(i) + ".xyz");
+	}
+	return 9;
+
+
+	std::vector<std::string> elementsE = { "B" };
+	std::vector<int> compositionC = { 7 };
+
+	double rad = 3.5;
+	int rcp = 20;
+	int bondNum = 2;
+	srand(time(0));
+	for (int i = 0; i < 10; i++)
+	{
+		std::cout << "attempt " << i << std::endl;
+		structure* seed;
+		do {
+			seed = proceduralSeedFromGroupTheory(i,compositionC, elementsE, rad);
+
+			while (!radialCriteria(*seed, rcp))
+			{
+				delete seed;
+				seed = proceduralSeedFromGroupTheory(i, compositionC, elementsE, rad);
+			}
+			std::cout << "symmetry: " << seed->nsym << " " << seed->hsym << std::endl;
+		}while(!bondingRequirement(seed, rcp, bondNum));
+		std::cout << "accepted" << std::endl;
+		std::cout << bondingRequirement(seed, rcp, bondNum) << std::endl;
+		seed->writeToXyz("b7_" + std::to_string(i) + ".xyz");
+	}
+	return 0; 
+
+	std::cout << "generating 10 seeds for 5 radial requirements and checking bond requirements" << std::endl;
+	std::vector<double> radii = { 3.5, 3.0, 2.7, 2.5, 2.0,1.5 };
+
+	for (int r = 0; r < radii.size(); r++)
+	{
+		std::cout << "radius: " << radii[r] << std::endl;
+		structure* seed;
+		for (int i = 0; i < 1; i++)
+		{
+			seed = seedFromGroupTheory(compositionC, elementsE, radii[r]);
+			do {
+				while (!radialCriteria(*seed, rcp))
+				{
+					delete seed;
+					seed = seedFromGroupTheory(compositionC, elementsE, radii[r]);
+				}
+			} while (!bondingRequirement(seed, rcp, bondNum));
+			std::cout << "seed passed" << std::endl;
+		}
+	}
 
 	return 0;
-	
 	//*/
+	
 	/*
 	-b basis
 	-m  method
 	-l previous file name
+	-i structure initialization file
 	-f output file
 	-n taskName
 	-comp composition
 	-pr radial criteria percent
+	-prti radial criteria trapping iteration - at least 1. default 5
+	-prtf radial criteria trapping freedom - greater than 0. default 10
 	-pi percent change i
 	-pf percent change f
+	-ps RID percent
 	-charge charge
 	-s state
 	-o optimization cycles
-	-i cycles
 	-t time
 	-stepsC coordination steps
 	-stepsL local minima steps
+	-stepsS scf steps
 	-xyz
 	-ABC
+	-g DirectionExponent proportionExponent Enormalization
+	-h hybrid switching step
+	-keepFiles
+	-
 
+
+	alternate modes:
+
+	-vflag input output :  creates .obj file for  visualization of the structure
+	-vgflag input output : creates .obj file for visualization of gaussian optimization output
+	-cgo input output -b basis -m method -o optimizationcycles -stepsS SCFsteps -n taskName -charge charge -s state : takes a structure and creates a gaussian optimization input file for it
 	*/
 	
 	std::string basis;
 	std::string method;
-	std::string previousFilename;
+	std::string previousFilename = "";
 	std::string outputFileName;
+	std::string initializationFile;
+	bool initialized = false;
 	std::string taskName;
 	std::vector<std::string> elements;
 	std::vector<int> composition;
 	std::string compositionString;
 	//std::string potential;
 	double radialCriteriaPercent;
+	double radialCriteriaTrappingIteration = 5;
+	double radialCriteriaTrappingFreedom = 10;
 	double percentChangeI;
 	double percentChangeF;
+	double percentRID = 2;
+	bool keepFiles = false;
+	int timeOutMinutes = -1;
+	int timeOutMinutesSP = -1;
+
+	double deltaEThr = 0;
+	bool blindGradientDescent = false;
+	int proportionExponent = 0;
+	int directionExponent = 0;
+	int hybridSteps = 0;
+
+
 	int charge;
 	int state;
 	int optimizationCycles;
-	int cycles;
-	int time;
+	double time;
 	int coordinationSteps;
 	int localMinimaTrappingSteps;
+	int misstepTrapping;
 	int HFsteps;
 	int SCFsteps;
+	std::string converge = "1.0e-6";
 	char dft;//dft calculator for energy and optimization
 
 	bool continuePastRun = false;
@@ -2665,6 +5186,9 @@ int main(int argv, char *argc[])
 	double a = 0; 
 	double b = 0;
 	double c = 0;
+	double rlimit = 0;
+	int uphillstopping = 1;
+
 
 	bool fflag = false;
 	bool bflag = false;
@@ -2674,22 +5198,105 @@ int main(int argv, char *argc[])
 	bool mflag = false;
 	bool tflag = false;
 	bool sflag = false;
+
+	bool filterOff = false;
+
+	std::string structureName = "";
+	std::string objName = "";
+
+	//alternate modes
+	bool vflag = false;
+	bool vgflag = false;
+	bool vlflag = false;
+	double lmEthr = 1;
+	bool cgo = false;
+	bool groupTheoryFlag = false;
+
+	bool refine = false;
+	bool gtgd = false;
+	bool checkEnergy = false;
+	bool optimizePositive = false;
+
+	bool planarLimitation = false;
+	bool covalentCriteria = false;
+	bool covalentCriteriaPercent = 0;
+	int covalentCriteriaSteps = 0;
+	int bondRequirement = 0;
+	int criteriaIterations = 10000;
+
+	bool BHC = false;//run basin hopping algorrithm with criteira
+	bool BH = false;//run basin hopping algorithm
+	bool BHS = false;
+
+	char symmetryMode = 'n';
+
+	bool partialSymmetry = false;
+	bool extraHoles = false;
+	bool alignHoles = true;
+	bool variantSymmetry = false;
+	double nMultiplier = 1;
+	double temp = 293.15;
+	/*
+	/*
+	//p is procedural, each symmetry allowed will be tried one by one
+	//r is random, from allowed symmetries a random one will be tried
+	//s this generates a seed with random symmetry, symmetries with more reasonable structures will be visited more
+	//n no symmetry, a random seed
+	*/
+
 	//ModifiedBasinHopping.exe -c CH4 -xyz 5 5 5 -abc 20 20 20 -t 1 -s 100 -l 30 -n isItWorking testOutOne -r 50
 	for (int i = 1; i < argv; i++)
 	{
-		std::cout << "current argument: " << argc[i]  << " next argument: " << argc[i+1] << std::endl;
+		if (i + 1 < argv) std::cout << "current argument: " << argc[i] << " next argument: " << argc[i + 1] << std::endl;
+		else std::cout << "current argument: " << argc[i] << std::endl;
 		if (i + 1 > argv)
 		{
 			std::cout << "flag out of bounds" << std::endl;
-		}
-		else if(argc[i+1][0] == '-' && (std::string)argc[i] != "-charge") {
-			std::cout << "missing argument for: " << argc[i] << std::endl;
 		}
 		else {
 		if ((std::string)argc[i] == "-l") {
 			previousFilename = argc[i + 1];
 			if (DEBUG) std::cout << "previous filename: " << previousFilename << std::endl;
 			continuePastRun = true;
+			i++;
+		}else if ((std::string)argc[i] == "-refine") {
+			previousFilename = argc[i + 1];
+			if (DEBUG) std::cout << "previous filename: " << previousFilename << std::endl;
+			refine = true;
+			i++;
+		}
+		else if ((std::string)argc[i] == "-gt") {
+			gtgd = true;
+			proportionExponent = std::atoi(argc[i + 2]);
+			directionExponent = std::atoi(argc[i + 1]);
+			deltaEThr = std::stof(argc[i + 3]);
+			i += 3;
+			if (DEBUG) std::cout << "group theory gradient descent " << std::endl;
+		}
+		else if ((std::string)argc[i] == "-BH") {
+			BH = true;
+			deltaEThr = std::stof(argc[i + 1]);
+			i ++;
+			if (DEBUG) std::cout << "basin hopping" << std::endl;
+		}
+		else if ((std::string)argc[i] == "-BHC") {
+			BHC = true;
+			deltaEThr = std::stof(argc[i + 1]);
+			i++;
+			if (DEBUG) std::cout << "basin hopping with criteria" << std::endl;
+		}
+		else if ((std::string)argc[i] == "-BHS") {
+			BHS = true;
+			if (DEBUG) std::cout << "basin hopping with symmetry" << std::endl;
+		}
+		else if ((std::string)argc[i] == "-r") {
+			rlimit = std::atof(argc[i + 1]);
+			if (DEBUG) std::cout << "radial limi: " << rlimit << std::endl;
+			i++;
+		}
+		else if ((std::string)argc[i] == "-stepsU") {
+			uphillstopping = std::atoi(argc[i + 1]);
+			if (DEBUG) std::cout << "uphillstopping: " <<uphillstopping << std::endl;
 			i++;
 		}
 		else if ((std::string)argc[i] == "-d")
@@ -2718,6 +5325,7 @@ int main(int argv, char *argc[])
 			std::pair< std::vector<int>, std::vector<std::string>> comppair = getComposition(compositionString);
 			composition = comppair.first;
 			elements = comppair.second;
+			
 			for (std::vector<int>::iterator it = composition.begin(); it != composition.end(); it++)
 			{
 				if (DEBUG) std::cout << *it << " ";
@@ -2745,15 +5353,9 @@ int main(int argv, char *argc[])
 			if (DEBUG) std::cout << "abc: " << a << " " << b << " " << c << std::endl;
 			i += 3;
 		}
-		else if ((std::string)argc[i] == "-i")
-		{
-			cycles = std::atoi(argc[i + 1]);
-			if (DEBUG) std::cout << "cycles?: " << cycles << std::endl;
-			i++;
-		}
 		else if ((std::string)argc[i] == "-t")
 		{
-			time = std::atoi(argc[i + 1]);
+			time = std::atof(argc[i + 1]);
 			if (DEBUG) std::cout << "time allowed: " << time << std::endl;
 			i++;
 		}
@@ -2769,6 +5371,12 @@ int main(int argv, char *argc[])
 			if (DEBUG) std::cout << "local minima trapping steps: " << localMinimaTrappingSteps << std::endl;
 			i++;
 		}
+		else if ((std::string)argc[i] == "-stepsM")
+		{
+			misstepTrapping = std::atoi(argc[i + 1]);
+			if (DEBUG) std::cout << "misstep trapping steps: " << misstepTrapping << std::endl;
+			i++;
+		}
 		else if ((std::string)argc[i] == "-stepsH")
 		{
 			HFsteps = std::atoi(argc[i + 1]);
@@ -2780,6 +5388,12 @@ int main(int argv, char *argc[])
 			SCFsteps = std::atoi(argc[i + 1]);
 			if (DEBUG) std::cout << "scf steps: " << SCFsteps << std::endl;
 			i++;
+		}
+		else if ((std::string)argc[i] == "-converge")
+		{
+		converge = argc[i + 1];
+		if (DEBUG) std::cout << "scf converge: " << converge << std::endl;
+		i++;
 		}
 		else if ((std::string)argc[i] == "-n")
 		{
@@ -2793,11 +5407,50 @@ int main(int argv, char *argc[])
 			if (DEBUG) std::cout << "output filename: " << outputFileName << std::endl;
 			i++;
 		}
+		else if ((std::string)argc[i] == "-i")
+		{
+		initializationFile = argc[i + 1];
+		initialized = true;
+		if (DEBUG) std::cout << "initializationfilename: " << initializationFile << std::endl;
+		i++;
+		}
 		else if ((std::string)argc[i] == "-pr")
 		{
 			radialCriteriaPercent = std::stof(argc[i + 1]);
 			if (DEBUG) std::cout << "radial criteria percent: " << radialCriteriaPercent << std::endl;
 			i++;
+		}
+		else if ((std::string)argc[i] == "-cc")
+		{
+		covalentCriteria = true;
+		covalentCriteriaPercent = std::stof(argc[i + 1]);
+		covalentCriteriaSteps = std::stof(argc[i + 2]);
+		if (DEBUG) std::cout << "covalent criteria percent: " << covalentCriteriaPercent << " , covalent criteria steps: " << covalentCriteriaSteps << std::endl;
+		i+=2;
+		}
+		else if ((std::string)argc[i] == "-br")
+		{
+		bondRequirement = std::stof(argc[i + 1]);
+		if (DEBUG) std::cout << "bond requirement: " << bondRequirement << std::endl;
+		i ++;
+		}
+		else if ((std::string)argc[i] == "-cI")
+		{
+		criteriaIterations = std::stoi(argc[i + 1]);
+		if (DEBUG) std::cout << "criteria iterations: " << criteriaIterations << std::endl;
+		i++;
+		}
+		else if ((std::string)argc[i] == "-prti")
+		{
+		radialCriteriaTrappingIteration = std::stof(argc[i + 1]);
+		if (DEBUG) std::cout << "radial criteria trapping iteration: " << radialCriteriaTrappingIteration << std::endl;
+		i++;
+		}
+		else if ((std::string)argc[i] == "-prtf")
+		{
+		radialCriteriaTrappingFreedom = std::stof(argc[i + 1]);
+		if (DEBUG) std::cout << "radial criteria trapping freedom: " << radialCriteriaTrappingFreedom << std::endl;
+		i++;
 		}
 		else if ((std::string)argc[i] == "-pi")
 		{
@@ -2810,6 +5463,12 @@ int main(int argv, char *argc[])
 			percentChangeF = std::stof(argc[i + 1]);
 			if (DEBUG) std::cout << "percent change F: " << percentChangeF << std::endl;
 			i++;
+		}
+		else if ((std::string)argc[i] == "-ps")
+		{
+		percentRID = std::stof(argc[i + 1]);
+		if (DEBUG) std::cout << "RID percent: " << percentRID << std::endl;
+		i++;
 		}
 		else if ((std::string)argc[i] == "-charge")
 		{
@@ -2829,6 +5488,127 @@ int main(int argv, char *argc[])
 		if (DEBUG) std::cout << "optimization cycles: " << optimizationCycles << std::endl;
 		i++;
 		}
+		else if ((std::string)argc[i] == "-g")
+		{
+		blindGradientDescent = true;
+		proportionExponent = std::atoi(argc[i + 2]);
+		directionExponent = std::atoi(argc[i + 1]);
+		deltaEThr = std::stof(argc[i + 3]);
+		if (DEBUG) std::cout << "blind gradient descent: " << proportionExponent << " " << directionExponent << " " << deltaEThr << std::endl;
+		i+=3;
+		}
+		else if ((std::string)argc[i] == "-h")
+		{
+		hybridSteps = std::atoi(argc[i + 1]);
+		if (DEBUG) std::cout << "hybrid steps: " << hybridSteps << std::endl;
+		i++;
+		}
+		else if ((std::string)argc[i] == "-to")
+		{
+		timeOutMinutes = std::atoi(argc[i + 1]);
+		timeOutMinutesSP = std::atoi(argc[i + 2]);
+		if (DEBUG) std::cout << "timeoutminutes: " << timeOutMinutes << std::endl;
+		i+=2;
+		}
+		else if ((std::string)argc[i] == "-keepFiles" || (std::string)argc[i] == "-keep" || (std::string)argc[i] == "-keepfiles")
+		{
+			std::cout << "keep files on" << std::endl;
+			keepFiles = true;
+		}
+		else if ((std::string)argc[i] == "-filterOff" || (std::string)argc[i] == "-filteroff" || (std::string)argc[i] == "-nofilter")
+		{
+		std::cout << "similarity filter turned off" << std::endl;
+		filterOff = true;
+		}
+		else if ((std::string)argc[i] == "-v")
+		{
+		structureName = argc[i + 1];
+		objName = argc[i + 2];
+		vflag = true;
+		i+=2;
+		}
+		else if ((std::string)argc[i] == "-vg")
+		{
+		structureName = argc[i + 1];
+		objName = argc[i + 2];
+		vgflag = true;
+		i += 2;
+		}
+		else if ((std::string)argc[i] == "-vl")
+		{
+		structureName = argc[i + 1];
+		objName = argc[i + 2];
+		lmEthr = std::stod(argc[i + 3]);
+		vlflag = true;
+		i += 3;
+		}
+		else if ((std::string)argc[i] == "-groupTheorySeeds")
+		{
+		//use composition string as well
+		objName = argc[i + 1];
+		groupTheoryFlag = true;
+		i += 1;
+		}
+		else if ((std::string)argc[i] == "-seed")
+		{
+		//use composition string as well
+		symmetryMode = argc[i + 1][0];
+
+		/*
+		case 'i'://i for iterate through the possible symmetries
+		case 'r'://r for randomly choose from the possible symmetries
+		case 'g'://symetrical seed with random symmetry. g for group theory seed
+		case 'n'://no symmetry
+		case 'o'://either symmetrical only, or also partial symmetry. create all seeds first, then order by energy and begin blind gradient descent.
+
+		bool partialSymmetry = false;
+		bool extraHoles = false;
+		bool alignHoles = true;
+		bool variantSymmetry = false;
+		double nMultiplier = 1;
+		double temp = 293.15;
+		*/
+			if (symmetryMode == 'o')
+			{
+				partialSymmetry = std::stoi(argc[i + 2]);
+				extraHoles = std::stoi(argc[i + 3]);
+				alignHoles = std::stoi(argc[i + 4]);
+				variantSymmetry = std::stoi(argc[i + 5]);
+				nMultiplier = std::stod(argc[i + 6]);
+				i += 6;
+			}
+			else {
+				i++;
+			}
+
+		
+		}
+		else if ((std::string)argc[i] == "-temp")
+		{
+		temp = std::stod(argc[i + 1]);
+		i ++;
+		}
+		else if ((std::string)argc[i] == "-cgo")
+		{
+		structureName = argc[i + 1];
+		cgo = true;
+		objName = argc[i + 2];
+		i += 2;
+		}
+		
+		else if ((std::string)argc[i] == "-check" || (std::string)argc[i] == "-checkEnergy")
+		{
+			checkEnergy = true;
+		}
+		else if ((std::string)argc[i] == "-op" || (std::string)argc[i] == "-optimizePositive")
+		{
+			optimizePositive = true;
+			checkEnergy = true;
+		}
+		else if ((std::string)argc[i] == "-planar")
+		{
+			planarLimitation = true;
+		}
 		else {
 			std::cout << argc[i] << " not identified as a flag" << std::endl;
 		}
@@ -2838,34 +5618,278 @@ int main(int argv, char *argc[])
 
 		
 	}
-
 	if (DEBUG) std::cout << "opening if else " << std::endl;
-	if (continuePastRun)
+	if (vflag)
 	{
-		if (DEBUG) std::cout << "continuing modified basin hopping: " << std::endl;
-		continueModifiedBasinHopping(previousFilename, charge, state,dft, method, basis, optimizationCycles, percentChangeI, percentChangeF, coordinationSteps, time, localMinimaTrappingSteps, 0,radialCriteriaPercent, outputFileName, taskName, a, b, c);
-		//continueModifiedBasinHopping(previousFilename, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, coordinationSteps, time, localMinimaTrappingSteps, radialCriteriaPercent,outputFileName, taskName, a, b, c);
+
+		std::vector<int> compositionV;
+		std::vector<std::string> elementsV;
+	
+		
+
+		std::ifstream startFile(structureName);
+		std::string inLine;
+		std::getline(startFile, inLine);// "Composition:\n";
+		std::getline(startFile, inLine);//composition
+		std::pair< std::vector<int>, std::vector<std::string>> compV = getComposition(inLine);
+		compositionV = compV.first;
+		elementsV = compV.second;
+		std::getline(startFile, inLine);//;"Cell size:\n";
+		std::getline(startFile, inLine); //std::to_string(x) + " " + std::to_string(y) + " " + std::to_string(z) + "\n";
+		std::getline(startFile, inLine); //"threshold:\n";
+		std::getline(startFile, inLine);//threshold
+		std::getline(startFile, inLine);// best structure
+		std::getline(startFile, inLine);
+		std::cout << inLine << std::endl;
+		structure readStructure(inLine, elementsV, compositionV);
+		readStructure.writeToObj(objName);
+
+	}
+	else if (vgflag)
+	{
+		//same as vflag except its a gaussian outwput file instead
+		std::vector<int> compositionV;
+		std::vector<std::string> elementsV;
+
+		std::ifstream gOutFile(structureName);
+
+		std::string cline;
+		structure* st = nullptr;
+
+		std::string matchString = "Input orientation:";
+		while (std::getline(gOutFile, cline)) {
+			if (cline.length() > matchString.length())
+			{
+
+				bool matching = false;
+				int matchIt = 0;
+				for (int l = 0; l < cline.length() - matchString.length(); l++)
+				{
+					if (cline[l] == matchString[matchIt])
+					{
+						matchIt++;
+						matching = true;
+					}
+					else if (matchIt < 18) {
+						matchIt = 0;
+						matching = false;
+					}
+					else {
+					}
+				}
+				if (matching) std::cout << "matching ends check length: " << matchIt << " " << matchString.length() << std::endl;
+				if (matching && matchIt >= matchString.length())
+				{
+					std::vector<std::vector<atom>> set;
+					std::vector<std::string> elements;
+					getline(gOutFile, cline);
+					getline(gOutFile, cline);
+					getline(gOutFile, cline);
+					getline(gOutFile, cline);
+					char space = ' ';
+
+
+					while (std::getline(gOutFile, cline) && cline[1] != '-')
+					{
+						std::string cnumber = "";
+
+						int num = 0;
+						std::string element;
+						double x = 0;
+						double y = 0;
+						double z = 0;
+						for (int i = 0; i < cline.length(); i++)
+						{
+							if (cline[i] == space)
+							{
+								if (cnumber.length() > 0)
+								{
+									num++;
+									switch (num)
+									{
+									case 1:
+										break;
+									case 2:
+										element = atomicNumber(std::stoi(cnumber));
+										break;
+									case 3:
+										break;
+									case 4:
+										x = std::stof(cnumber);
+										break;
+									case 5:
+										y = std::stof(cnumber);
+										break;
+									case 6:
+										z = std::stof(cnumber);
+										break;
+									default:
+										break;
+									}
+									cnumber = "";
+								}
+							}
+							else {
+								cnumber += cline[i];
+							}
+						}
+						int index = -1;
+						for (int i = 0; i < elements.size(); i++)
+						{
+							if (elements[i] == element)
+							{
+								index = i;
+							}
+						}
+						if (index == -1)
+						{
+							elements.push_back(element);
+							std::vector < atom> alist = { atom(x,y,z) };
+							set.push_back(alist);
+						}
+						else {
+							set[index].push_back(atom(x, y, z));
+						}
+					}
+					if (st != nullptr) delete st;
+					st = new structure(set, elements);
+				}
+			}
+		}
+		gOutFile.close();
+
+		st->writeToObj(objName);
+
+		delete st;
+	}
+	else if (vlflag) {
+		//obj name should not end in .obj
+		std::vector<int> compositionV;
+		std::vector<std::string> elementsV;
+
+
+
+		std::ifstream startFile(structureName);
+		std::string inLine;
+		std::getline(startFile, inLine);// "Composition:\n";
+		std::getline(startFile, inLine);//composition
+		std::pair< std::vector<int>, std::vector<std::string>> compV = getComposition(inLine);
+		compositionV = compV.first;
+		elementsV = compV.second;
+		std::getline(startFile, inLine);//;"rlimit:\n";
+		std::getline(startFile, inLine); //std::to_string(r) 
+		std::getline(startFile, inLine); //"threshold:\n";
+		std::getline(startFile, inLine);//threshold
+		std::getline(startFile, inLine);// best structure
+		std::getline(startFile, inLine);
+		structure bestStructure(inLine, elementsV, compositionV);
+		double bestEnergy = bestStructure.energy;
+		//readStructure.writeToObj(objName + "_Best.obj" );
+		std::getline(startFile, inLine);//structures searched prior
+		std::getline(startFile, inLine);//energy
+		for(int i = 0; i < compositionV.size(); i++) for(int e = 0; e < compositionV[i];e++) std::getline(startFile, inLine);//zmatrix lines
+		std::getline(startFile, inLine);//last energy structure
+		std::getline(startFile, inLine);//energy
+		std::getline(startFile, inLine);//steps since new
+		std::getline(startFile, inLine);
+		std::getline(startFile, inLine);//recycles since new
+		std::getline(startFile, inLine);
+		std::getline(startFile, inLine);//uphill
+		std::getline(startFile, inLine);
+		std::getline(startFile, inLine);//optimizations in current seed
+		std::getline(startFile, inLine);
+		std::getline(startFile, inLine);//step
+		std::getline(startFile, inLine);
+		std::getline(startFile, inLine);//ccStep
+		std::getline(startFile, inLine);
+		std::getline(startFile, inLine);//local minima only
+		std::vector<structure*> desiredMinima = {};//minima within the threshold from best
+		std::getline(startFile, inLine);
+		do {
+			//std::cout << inLine << std::endl;
+			structure* cStructure = new structure(inLine, elementsV, compositionV);
+			//std::cout << "succeded to make structure" << std::endl;
+			if (cStructure->energy < bestEnergy + lmEthr) desiredMinima.push_back(cStructure);
+			else delete cStructure;
+			//std::cout << "failed to get enrgy" << std::endl;
+			std::getline(startFile, inLine);
+		} while (inLine[0] != 'a');
+		std::cout << "debug 3" << std::endl;
+		for (int s = 0; s < desiredMinima.size(); s++)
+		{
+			desiredMinima[s]->writeToObj(objName + "_" + std::to_string(s) + ".obj");
+			delete desiredMinima[s];
+		}
+		std::cout << "debug 4" << std::endl;
+
+	}
+	else if (cgo)
+	{
+		std::vector<int> compositionV;
+		std::vector<std::string> elementsV;
+
+		std::ifstream startFile(structureName);
+		std::string inLine;
+		std::getline(startFile, inLine);// "Composition:\n";
+		std::getline(startFile, inLine);//composition
+		std::pair< std::vector<int>, std::vector<std::string>> compV = getComposition(inLine);
+		compositionV = compV.first;
+		elementsV = compV.second;
+		std::getline(startFile, inLine);//;"Cell size:\n";
+		std::getline(startFile, inLine); //std::to_string(x) + " " + std::to_string(y) + " " + std::to_string(z) + "\n";
+		std::getline(startFile, inLine); //"threshold:\n";
+		std::getline(startFile, inLine);//threshold
+		std::getline(startFile, inLine);// best structure
+		std::getline(startFile, inLine);
+		std::cout << inLine << std::endl;
+		structure readStructure(inLine, elementsV, compositionV);
+		
+		writeToGuassian(readStructure, taskName, objName, basis, method, charge, state, optimizationCycles, SCFsteps);
+		
+
+	}
+	else if (groupTheoryFlag)
+	{
+		//required other flags:
+		//composition
+		//radial criteria percent
+		//ModifiedBasinHopping.exe -groupTheorySeeds b8seeds/b8 -comp B8 -pr 60 -r 2
+		std::vector<structure*> structures;
+		for (int i = 0; i < 100; i++)
+		{
+			structure* s = seedFromGroupTheory(composition, elements, rlimit);
+			while (!radialCriteria(*s, radialCriteriaPercent))
+			{
+				if (DEBUG) std::cout << "did not pass criteria (radial) in seed creation" << std::endl;
+				delete s;
+				s = seedFromGroupTheory(composition, elements, rlimit);
+			}
+			std::string objFileName = objName + "_C" + std::to_string(s->nsym);
+			if (s->hsym != 0) objFileName += "h";
+			objFileName += "_" + std::to_string(i) + ".obj";
+
+			s->writeToObj(objFileName);
+			delete s;
+		}
+		
+		
 	}
 	else {
-		if (DEBUG) std::cout << "start modified basin hopping: " << std::endl;
-		startModifiedBasinHopping(x, y, z, percentChangeI, percentChangeF, composition, elements, charge, state,dft, method, basis, optimizationCycles, coordinationSteps, time, localMinimaTrappingSteps, 0,radialCriteriaPercent, outputFileName, taskName, a, b, c);
-		//startModifiedBasinHopping(x, y, z, composition, elements, basinHoppingEnergy, optimize, radialCriteria, coordinationNumber, coordinationSteps, time, localMinimaTrappingSteps, radialCriteriaPercent,outputFileName, taskName, a, b, c);
+		if (gtgd)
+		{
+			groupTheoryGradientDescent(previousFilename,composition, elements, x, y, z, rlimit,symmetryMode, percentChangeI, percentChangeF, percentRID, charge, state, dft, method, basis, optimizationCycles, SCFsteps, HFsteps, time, localMinimaTrappingSteps, uphillstopping, misstepTrapping, radialCriteriaPercent,  outputFileName, taskName, directionExponent, proportionExponent, deltaEThr,checkEnergy,optimizePositive, keepFiles,filterOff,converge,timeOutMinutes,timeOutMinutesSP,covalentCriteria,covalentCriteriaPercent,covalentCriteriaSteps,bondRequirement,criteriaIterations,planarLimitation ,partialSymmetry,extraHoles,alignHoles,variantSymmetry,nMultiplier , temp);
+			/*
+			ModifiedBasinHopping.exe -gt 1 1 0.1 -m PBEPBE -b '6-31+g(d,p)' -d b -f latest -n gtb -comp B6 -pr 60 -pi 10 -pf 100 -charge -1 -s 1 -o 30 -t 0.505 -stepsL 30 -stepsM 5 -stepsU 10 -stepsH 10 -stepsS 129 -xyz 0.2 0.2 0.2 -r 2 -ps 2
+			*/
+		}else if (BH)
+		{
+			basinHopping(previousFilename,symmetryMode,composition,elements,x,y,z,rlimit,percentChangeI,percentChangeF,percentRID,charge,state,dft,method,basis,optimizationCycles,SCFsteps,HFsteps,time,localMinimaTrappingSteps,outputFileName,taskName,deltaEThr,checkEnergy,optimizePositive,keepFiles,converge,timeOutMinutes,timeOutMinutesSP);
+		}
+		else if (BHC)
+		{
+			basinHoppingCriteria(previousFilename,symmetryMode,composition,elements,x,y,z,rlimit,percentChangeI,percentChangeF,percentRID,charge,state,dft,method,basis,optimizationCycles,SCFsteps,HFsteps,time,localMinimaTrappingSteps,radialCriteriaPercent,outputFileName,taskName,deltaEThr,checkEnergy,optimizePositive,keepFiles, filterOff, converge,timeOutMinutes,timeOutMinutesSP,covalentCriteria,covalentCriteriaPercent,covalentCriteriaSteps,bondRequirement);
+		}
 	}
-
-
-	//basic energy retrieval test
-	/*
-	srand(time(NULL));
-
-	std::vector<int> composition = { 1,4 };
-	std::vector<std::string> elements = { "C","H" };
-	structure s(8, 8, 8, composition, elements);
-
-	int num = rand() % 100;
-
-	std::cout << energyCP2K(s, num, "methaneTest", 8, 8, 8, "");
-	*/
-	
 	
 }
 
