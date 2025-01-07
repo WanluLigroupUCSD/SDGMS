@@ -1,0 +1,24 @@
+composition
+6 B
+end
+xyzinp input
+xyzout ruout.xyz
+rva
+2,3,0
+end
+keep 50
+calculator Gaussian
+energyFile e
+optimizationFile o
+timeOutE 20
+timeOutO 300
+time 11.5
+nopt 20
+stepsize 0.6
+uphill 20
+branches 36
+criteria 30
+unique 0.1
+assignment 0 1 2 3 4 5
+nad 6
+rseed 1
