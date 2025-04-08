@@ -15,11 +15,16 @@
 #include <string>
 #include <map>
 #include <queue>
+#include <iomanip>
 # define M_PI           3.14159265358979323846
+#ifndef DBL_MAX
+#define DBL_MAX 1.79769e+308;
+#endif
 
 class atom {
 public:
 	atom(double x, double y, double z);
+	atom(double x, double y, double z,int group);
 	atom();
 	atom(const atom& t);
 	atom operator=(const atom& t);
@@ -35,7 +40,14 @@ public:
 	double psi;
 	double r;
 	double* scores = nullptr;
+	int group = 0;//fixed in place
 	int types = 0;
+	atom operator-(const atom& other);
+	atom cross(const atom& other);
+	double dot(const atom& other);
+	atom normalize();
+	std::vector<double> vec3();
+	int fixedGroup = -1;
 	~atom();
 };
 
@@ -50,14 +62,17 @@ bool radiusCompare(atom a, atom b);
 
 class structure {
 public:
-	structure(std::vector<std::vector<atom>> set, std::vector<std::string> elements, bool sort = false);
+	structure(std::vector<std::vector<atom>> set, std::vector<std::string> elements, bool center = false);
+	structure(std::vector<std::vector<atom>> set,  std::vector<std::string> elements, std::vector<std::vector<int>> assignment, bool center = false);
 	structure(std::string input, std::vector<std::string> elements,std::vector<int> composition);
 	structure(double x, double y, double z, int n, bool sort = false);//random generation in range
 	structure(double x, double y, double z, std::vector<int> composition, std::vector<std::string> elements, bool sort = false);//random generation in range
 	structure(structure& original, double variationX, double variationY, double variationZ, double cellX, double cellY, double cellZ, bool sort = false);//produce similar structure;
 	structure(structure& original, std::vector<double> variation);
+	structure(structure& original, std::vector<double> variation, std::vector<int> fix, bool bound = false, float xb = 0, float yb = 0, float zb = 0);
 	structure(structure& original, std::vector<double> variation, double dx, double dy, double dz);
 	structure(structure& original, double percentVariationX, double percentVariationY, double percentVariationZ, bool sort = false);
+	//structure(const structure& other);
 	bool operator<(const structure& other);
 	void radiusSort();
 	void rotateX(double degrees);
@@ -69,6 +84,7 @@ public:
 	void printZmatrix();
 	void writeToObj(std::string outputName);
 	void writeToXyz(std::string outputName);
+	std::string xyz();
 	std::vector<std::vector<atom>> set;//first vector is atom types, second is atoms;
 	std::vector<std::vector<int>> coordinationNumbers;
 	std::vector<int> composition;
@@ -78,6 +94,8 @@ public:
 	bool scored = false;
 	double** zmatrix = nullptr;
 	std::string* zmatrixElements = nullptr;
+	double time = -1;//the time this seed was made
+	std::vector<int> assignment;//assignment of all atoms to fixed groups
 	int zmatrixsize = 0;//equal to length of number of atoms, only set up for use in zmatrix
 	~structure();
 	//symmetries from group theory that do not need to be set
@@ -114,10 +132,13 @@ public:
 	Iterator end();
 };
 
+structure* merge(structure* a, structure* b,double shiftZb = 0);
+
+
 const double boltzman = 8.6173303e-5;//electron volts/kelvin
 const double electronVolt = 1.602e-19;//joule
 
-int covalentRadii(std::string element, int bond);
+int covalentRadii(std::string element, int bond, bool horizontal = false);
 int vanDerWaalsRadii(std::string element);
 double atomicRadius(std::string atomName);
 bool bondingRequirement(structure* s, int percent, bool numBonds = 0);
@@ -148,9 +169,9 @@ std::vector<atom> partialSymmetrySet(int composition, int n, bool h, double rmax
 
 
 
-std::vector<bool*> enumeration(int size, int totalValue);
+std::vector<bool*> enumeration(int size, int totalValue, bool initial);
 
-std::vector<bool*> alignedEnumeration(int size, int totalValue);
+std::vector<bool*> alignedEnumeration(int size, int totalValue, bool initial);
 
 class partialSymmetryDescriptor {
 	//a partial symmetry descriptor for a single element within a molecule
@@ -167,9 +188,13 @@ public:
 std::vector<atom> partialSymmetrySet(partialSymmetryDescriptor descriptor, double rmax);
 
 
-std::vector<structure*> seedsWithPartialSymmetry(bool extraHoles,bool alignHoles,bool variantSymmetry, double nMultiplier, std::vector<int> composition, std::vector<std::string> elements, double rmax, double radialCriteriaPercent, int bondRequirement, int criteriaIterations);
+std::vector<structure*> seedsWithPartialSymmetry(bool extraHoles,bool alignHoles,bool variantSymmetry, double nMultiplier, std::vector<int> composition, std::vector<std::string> elements, double rmax, double radialCriteriaPercent, int bondRequirement, int criteriaIterations, int nMin);
+std::vector<structure*> seedsWithPartialSymmetry(bool extraHoles, bool alignHoles, bool variantSymmetry, std::vector<int> nValues, std::vector<int> composition, std::vector<std::string> elements, double rmax, double radialCriteriaPercent, int bondRequirement, int criteriaIterations);
 
-std::vector<structure*> getSeeds(std::vector<int> composition, std::vector<std::string> elements, double radius, double radialCriteriaPercent, int bondRequirement, int criteriaIterations, bool partialSymmetry = false, bool extraHoles = false, bool alignHoles = true, bool variantSymmetry = false, double nMultiplier = 1);
+std::vector<structure*> seedsWithSpecificSymmetry(bool extraHoles, bool alignHoles, int n, bool h, std::vector<int> composition, std::vector<std::string> elements, double rmax, double radialCriteriaPercent, int bondRequirement, int criteriaIterations);
+
+
+std::vector<structure*> getSeeds(std::vector<int> composition, std::vector<std::string> elements, double radius, double radialCriteriaPercent, int bondRequirement, int criteriaIterations, bool partialSymmetry = false, bool extraHoles = false, bool alignHoles = true, bool variantSymmetry = false, double nMultiplier = 1, int nMin = 0, std::vector<int> nValues = {});
 
 void writeToXyz(std::vector<structure*> structures,std::string outputName);
 
@@ -177,5 +202,19 @@ std::vector<structure*> structuresFromXYZ(std::string fileName);
 
 
 bool energyCompare(structure* a, structure* b);
+
+structure* randomSeedInRadius(double radius, std::vector<int> composition, std::vector<std::string> elements);
+structure* randomSeedInRadiusFromRadialCriteria(double radius, std::vector<int> composition, std::vector<std::string> elements, double radialCriteriaPercent);
+
+std::vector<structure*>  XyzToStructures(std::string fileName, std::vector<std::string> elements);
+
+std::vector<int*> multinomialCoefficient(int n, std::vector<int> k);
+std::vector<structure*> proceduralSeeds(std::vector<int> composition, std::vector<std::string> elements, int numRings, std::vector<int> nValues, double covalentCriteriaPercent = 30, std::vector<int> allowedHoles = {},int keepPerCombo = -1, int keepPerRingCombination=-1,double achange = -1);
+std::vector<structure*> proceduralSeeds(std::vector<int> composition, std::vector<std::string> elements, std::vector<std::tuple<std::vector<int>,std::vector<int>,std::vector<int>>> nRingsNValuesAHoles, double covalentCriteriaPercent = 30,int keepPerCombo = -1, int keepPerRingCombination=-1, double achange = -1);
+
+std::vector<bool> randomNchooseC(int n, int c);
+/*
+std::vector<int>* copyAssignment(std::vector<int>* oldAs);
+*/
 #endif
 

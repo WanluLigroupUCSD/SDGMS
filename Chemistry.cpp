@@ -15,6 +15,12 @@ atom::atom(double x, double y, double z) :x(x), y(y), z(z)
     psi = std::acos((x / std::sqrt(x * x + y * y)));
     theta = z / r;
 }
+atom::atom(double x, double y, double z,int group) :x(x), y(y), z(z),group(group)
+{
+	r = std::sqrt(x * x + y * y + z * z);
+	psi = std::acos((x / std::sqrt(x * x + y * y)));
+	theta = z / r;
+}
 atom::atom(const atom& t):x(t.x),y(t.y),z(t.z),theta(t.theta),psi(t.psi),r(t.r),types(t.types)
 {
 	if (t.scores != nullptr)
@@ -72,6 +78,29 @@ bool atom::operator<(atom b) { return this->r < b.r; };
 bool atom::operator<=(atom b) { return this->r <= b.r; };
 bool atom::operator>=(atom b) { return this->r >= b.r; };
 bool atom::operator>(atom b) { return this->r > b.r; };
+
+atom atom::operator-(const atom& other) {
+	return atom( this->x - other.x, this->y - other.y, this->z - other.z );
+}
+
+atom atom::cross(const atom& other){
+	return atom(
+		this->y * other.z - this->z * other.y,
+		this->z * other.x - this->x * other.z,
+		this->x * other.y - this->y * other.x
+	);
+}
+
+std::vector<double> atom::vec3() { return{this->x,this->y,this->z}; }
+
+double atom::dot(const atom& other) {
+	return this->x * other.x + this->y * other.y + this->z * other.z;
+}
+
+atom atom::normalize(){
+	double n = std::sqrt(this->x * this->x + this->y * this->y + this->z * this->z);
+	return atom( this->x / n, this->y / n, this->z / n );
+}
 
 
 bool radiusCompare(atom a, atom b) { return a.r < b.r; };
@@ -145,8 +174,12 @@ double dihedralAngle(double* normalVector, atom b, atom a)
 
 
 
-structure::structure(std::vector<std::vector<atom>> set, std::vector<std::string> elements, bool sort) :set(set), elements(elements)
+structure::structure(std::vector<std::vector<atom>> set, std::vector<std::string> elements, bool center) :set(set), elements(elements)
 {
+	for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++)
+	{
+		composition.push_back(it->size());
+	}
 	//std::cout << "set sizes::" << std::endl;
 	//for (int i = 0; i < set.size(); i++) std::cout << set[i].size() << " ";
 	//std::cout << std::endl;
@@ -156,30 +189,95 @@ structure::structure(std::vector<std::vector<atom>> set, std::vector<std::string
     int n = 0;
 	//Today I learned that these iterators create copies of everything and then delete them...
 	//so if you want to use these iterators you need copy constructors for the objects inside that will not just copy pointers but instead recreate the objects
+	if (center) {
+		for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++)
+		{
+			for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
+			{
+				n++;
+				totalX += itt->x;
+				totalY += itt->y;
+				totalZ += itt->z;
+			}
+		}
+		x = totalX / (double)n;
+		y = totalY / (double)n;
+		z = totalZ / (double)n;
 
-    for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++)
-    {
-        for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
-        {
-            n++;
-            totalX += itt->x;
-            totalY += itt->y;
-            totalZ += itt->z;
-        }
-    }
-    x = totalX / (double)n;
-    y = totalY / (double)n;
-    z = totalZ / (double)n;
+		for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++)
+		{
+			//composition.push_back(it->size());
+			for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
+			{
+				itt->polarCenter(x, y, z);
+			}
+		}
+	}
+	//this->print();
+	//this->zmatrix = nullptr;
+	//this->zmatrixElements = nullptr;
+}
+structure::structure(std::vector<std::vector<atom>> set, std::vector<std::string> elements, std::vector<std::vector<int>> assignment, bool center )
+{
+	//the set input will have empty elements corresponding to the fragments, which must not be included
+	for (std::vector<std::vector<atom>>::iterator at = set.begin(); at != set.end(); at++) if (at->size() != 0) {
+		this->set.push_back(*at);
+		this->composition.push_back(at->size());
+	}
+	for (std::vector<std::vector<int>>::iterator it = assignment.begin(); it != assignment.end(); it++) if (it->size() != 0) for(std::vector<int>::iterator itt = it->begin(); itt!= it->end(); itt++) this->assignment.push_back(*itt);
 
-    for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++)
-    {
-        composition.push_back(it->size());
-        for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
-        {
-            itt->polarCenter(x, y, z);
-        }
-    }
-    if (sort)this->radiusSort();
+	for (std::vector<std::string>::iterator et = elements.begin(); et != elements.end(); et++) if (et->size() <= 2) this->elements.push_back(*et);//removes .xyz files
+
+	//std::cout << "creating structure from fragments with assignment size: " << assignment.size() << std::endl;
+	int a = 0;
+	//std::cout << "sets: ";
+	/*for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++)
+	{
+		std::cout << it->size() << ",";
+	}
+	std::cout << std::endl;
+	for (int s = 0; s < this->set.size(); s++)
+	{
+		std::cout << "element: " << this->elements[s] << ", " << " assignments: ";
+		for (int ss = 0; ss < this->set[s].size(); ss++)
+		{
+			//std::cout << ss << ":ss,s:" << s << ",a:" << a << std::endl;
+			std::cout << this->assignment[a++] << " ";
+		}
+		std::cout << std::endl;
+
+	}*/
+	double totalX = 0.0;
+	double totalY = 0.0;
+	double totalZ = 0.0;
+	int n = 0;
+
+
+
+	if (center) {
+		for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++)
+		{
+			for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
+			{
+				n++;
+				totalX += itt->x;
+				totalY += itt->y;
+				totalZ += itt->z;
+			}
+		}
+		x = totalX / (double)n;
+		y = totalY / (double)n;
+		z = totalZ / (double)n;
+
+		for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++)
+		{
+			//composition.push_back(it->size());
+			for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
+			{
+				itt->polarCenter(x, y, z);
+			}
+		}
+	}
 	//this->print();
 }
 structure::structure(double x, double y, double z, int n, bool sort)
@@ -433,9 +531,8 @@ structure::structure(structure& original, double variationX, double variationY, 
 }
 structure::structure(structure& original, std::vector<double> variation) :elements(original.elements)
 {
-	//makes variants of at most variation x,y,z
+	//makes variants of variation
 	int varIterator = 0;
-	
 	for (std::vector<std::vector<atom>>::iterator it = original.set.begin(); it != original.set.end(); it++)
 	{
 		std::vector<atom> atoms;
@@ -466,6 +563,82 @@ structure::structure(structure& original, std::vector<double> variation) :elemen
 	y = totalY / (double)n;
 	z = totalZ / (double)n;
 
+
+	for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++)
+	{
+		composition.push_back(it->size());
+		for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
+		{
+			itt->polarCenter(x, y, z);
+		}
+	}
+}
+structure::structure(structure& original, std::vector<double> variation,std::vector<int> fix, bool bound, float xb, float yb, float zb) :elements(original.elements),assignment(fix)
+{
+	
+	//std::cout << "MOVEMENT: ";
+	//for (std::vector<double>::iterator it = variation.begin(); it != variation.end(); it++ ) std::cout << *it << " ";
+	std::cout << std::endl;
+	//this one differs as variation is size = fix.size()*3 instead of atoms.size()*3
+	int atomIterator = 0;
+	for (std::vector<std::vector<atom>>::iterator it = original.set.begin(); it != original.set.end(); it++)
+	{
+		std::vector<atom> atoms;
+		for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
+		{
+			//std::cout << "atom iterator: " << atomIterator << std::endl;
+			//std::cout << "variations for atom " << atomIterator << ": " << variation[fix[atomIterator] * 3] << " " << variation[fix[atomIterator] * 3 + 1] << " " <<  variation[fix[atomIterator] * 3 + 2] << std::endl;
+			//std::cout << "indexes for atom " << atomIterator << ": " << fix[atomIterator] * 3 << " " << fix[atomIterator] * 3 + 1 << " " << fix[atomIterator] * 3 + 2 << std::endl;
+			double ax, ay, az;
+			if (fix[atomIterator] < 0)
+			{
+				//this is used for the support, so it never moves.
+				ax = itt->x;
+				ay = itt->y;
+				az = itt->z;
+				//std::cout << "NOT MOVING SUPPORT" << std::endl;
+			}
+			else {
+				//std::cout << "MOVING NON SUPPORT index " << fix[atomIterator] << " from atom iterator " << atomIterator << std::endl;
+				//std::cout << "variation: " << variation[fix[atomIterator] * 3] << " " << variation[fix[atomIterator] * 3 + 1] << " " << variation[fix[atomIterator] * 3 + 2] << std::endl;
+				ax = itt->x + variation[fix[atomIterator] * 3];
+				ay = itt->y + variation[fix[atomIterator] * 3 + 1];
+				az = itt->z + variation[fix[atomIterator] * 3 + 2];
+				if (bound) {
+					if (ax > xb / 2) ax -= xb;
+					if (ax < -xb / 2) ax += xb;
+					if (ay > yb / 2) ay -= yb;
+					if (ay < -yb / 2) ay += yb;
+					if (az > zb / 2) az -= zb;
+					if (az < -zb / 2) az += zb;
+				}
+			}
+
+			atom at = atom(ax,ay,az);
+			atoms.push_back(at);
+
+			atomIterator += 1;
+		}
+		set.push_back(atoms);
+	}
+
+	double totalX = 0.0;
+	double totalY = 0.0;
+	double totalZ = 0.0;
+	int n = 0;
+	for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++)
+	{
+		for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
+		{
+			n++;
+			totalX += itt->x;
+			totalY += itt->y;
+			totalZ += itt->z;
+		}
+	}
+	x = totalX / (double)n;
+	y = totalY / (double)n;
+	z = totalZ / (double)n;
 	for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++)
 	{
 		composition.push_back(it->size());
@@ -518,6 +691,10 @@ structure::structure(structure& original, std::vector<double> variation, double 
 		}
 	}
 }
+/*structure::structure(const structure& other) :elements(other.elements), assignment(other.assignment), set(other.set), zmatrix(nullptr), zmatrixElements(nullptr)
+{
+	std::cout << "copy constructor called" << std::endl;
+}*/
 /*structure::structure(structure& original, double variationX, double variationY, double variationZ, double rangeX, double rangeY, double rangeZ, bool sort) :elements(original.elements)
 {
     //makes variants of structure original where the minimum variation is varX,y& z and maximum is range
@@ -755,7 +932,7 @@ void structure::generateCoordinationNumbers(int percent)
 
 void structure::print()
 {
-	for (int i = 0; i < this->elements.size(); i++)
+	for (int i = 0; i < this->set.size(); i++)
 	{
 		for (int j = 0; j < this->set[i].size(); j++)
 		{
@@ -999,7 +1176,7 @@ void structure::writeToXyz(std::string outputName)
 
 	//outFile << "# Structure OBJ File" << std::endl;
 
-	outFile << std::to_string(natoms) << std::endl;
+	outFile << std::to_string(natoms) << std::endl << "Energy: " << this->energy << " , time: " << this->time;
 	for (int i = 0; i < this->set.size(); i++)
 	{
 		for (int j = 0; j < this->set[i].size(); j++)
@@ -1012,10 +1189,191 @@ void structure::writeToXyz(std::string outputName)
 
 
 }
+std::string structure::xyz()
+{
+	int natoms = 0;
+	//find center of mass
+	double tx = 0;
+	double ty = 0;
+	double tz = 0;
+	for (int i = 0; i < this->set.size(); i++)
+	{
+		for (int j = 0; j < this->set[i].size(); j++)
+		{
+			tx += this->set[i][j].x;
+			ty += this->set[i][j].y;
+			tz += this->set[i][j].z;
+			natoms++;
+		}
+	}
+	tx = tx / natoms;
+	ty = ty / natoms;
+	tz = tz / natoms;
+
+	/*
+
+	*/
+	
+
+	const double PI = 3.14159265359;
+
+	//outFile << "# Structure OBJ File" << std::endl;
+	std::string retVal = std::to_string(natoms) + "\nEnergy: " + std::to_string(this->energy) + " , time: " + std::to_string(this->time);
+	for (int i = 0; i < this->set.size(); i++)
+	{
+		for (int j = 0; j < this->set[i].size(); j++)
+		{
+			retVal += "\n" + this->elements[i] + " " + std::to_string(this->set[i][j].x - tx) + " " + std::to_string(this->set[i][j].y - ty) + " " + std::to_string(this->set[i][j].z - tz);
+		}
+	}
+
+	return retVal;
+}
+std::vector<structure*>  XyzToStructures(std::string fileName,std::vector<std::string> elements)
+{
+	std::ifstream file(fileName);
+	std::string line;
+	std::vector<structure*> retValue;
+	int numAtoms = 0;
+	while (std::getline(file, line))
+	{
+		if (numAtoms == 0) numAtoms = std::stoi(line);//the first line is a number
+		if (std::stoi(line) == numAtoms)
+		{
+		std::vector<int> composition;
+
+		std::getline(file, line);//blank line
+		std::vector<std::vector<atom>> set;
+		for (int i = 0; i < elements.size(); i++) set.push_back({});
+		for (int i = 0; i < numAtoms; i++)
+		{
+			std::getline(file, line);
+			std::string element;
+			std::string x;
+			std::string y;
+			std::string z;
+			int nspace = 0;
+			for (int c = 0; c < line.size(); c++)
+			{
+				if (line[c] == ' ')
+				{
+					nspace++;
+				}
+				else {
+					switch (nspace)
+					{
+					case 0:
+						element += line[c];
+						break;
+					case 1:
+						x += line[c];
+						break;
+					case 2:
+						y += line[c];
+						break;
+					case 3:
+						z += line[c];
+						break;
+					default:
+						break;
+					}
+				}
+			}
+			int e = 0;
+			while (element != elements[e]) { e++; };
+			set[e].push_back(atom(std::stof(x), std::stof(y), std::stof(z)));
+		}
+
+		structure* newStructure = new structure(set, elements);
+		retValue.push_back(newStructure);
+		}
+		else {
+			int lineskip = std::stoi(line);
+			for(int i = 0; i <= lineskip; i++) std::getline(file, line);
+			
+		}
+	}
+
+	file.close();
+	return retValue;
+}
+
+structure* merge(structure* a, structure* b, double shiftZb)
+{
+	//this function is intended to merge a support (structure b) to prior structure and can shift the support on the z axis if necessary.
+	std::vector<std::string> elements = {};
+	std::vector<std::vector<atom>> set = {};
+	std::vector<std::vector<int>> assignment = {};
+	for (int e = 0; e < b->elements.size(); e++)
+	{
+		//check if this element is already in elements
+		bool contained = false;
+		int elementIndex = -1;
+		for (int ee = 0; ee <  elements.size();  ee++)
+		{
+			if (elements[ee] == b->elements[e])
+			{
+				contained = true;
+				elementIndex = ee;
+			}
+		}
+		if (!contained) {
+			elementIndex = elements.size();//size is about to increase by 1 making current size the index.
+			elements.push_back(b->elements[e]);
+			set.push_back({});
+			assignment.push_back({});
+		}
+
+		for (std::vector<atom>::iterator at = b->set[e].begin(); at != b->set[e].end(); at++)
+		{
+			//std::cout << "adding element type " << e << " in merge from b" << std::endl;
+			set[elementIndex].push_back(atom(at->x, at->y, at->z + shiftZb));
+			assignment[elementIndex].push_back(-1);//-1 for support group
+		}
+
+	}
+
+	int aindex = 0;
+	for (int e = 0; e < a->elements.size(); e++)
+	{
+		//check if this element is already in elements
+		bool contained = false;
+		int elementIndex = -1;
+		for (int ee = 0; ee < elements.size(); ee++)
+		{
+			if (elements[ee] == a->elements[e])
+			{
+				contained = true;
+				elementIndex = ee;
+			}
+		}
+		if (!contained) {
+			elementIndex = elements.size();//size is about to increase by 1 making current size the index.
+			elements.push_back(a->elements[e]);
+			set.push_back({});
+			assignment.push_back({});
+		}
+
+		for (std::vector<atom>::iterator at = a->set[e].begin(); at != a->set[e].end(); at++) {
+			//std::cout << "adding atom from a" << std::endl;
+			set[elementIndex].push_back(atom(at->x, at->y, at->z));
+			assignment[elementIndex].push_back(a->assignment[aindex++]);
+		}
+	}
+	//std::cout << "set size:" << set.size() << std::endl;
+	structure* retval = new structure(set, elements,assignment);
+	//retval->assignment = assignment;
+	//retval->zmatrix = nullptr;
+	//retval->zmatrixElements = nullptr;
+	return retval;
+
+
+}
 
 //chemistry
-int covalentRadii(std::string element, int bond)
+int covalentRadii(std::string element, int bond, bool horizontal)
 {
+	//std::cout << element << std::endl;
 	if (element == "H") {
 		if (bond == 1) return 32;
 	}
@@ -1222,9 +1580,9 @@ int covalentRadii(std::string element, int bond)
 		else if (bond == 3) return 110;
 	}
 	else if (element == "Ru") {
-		if (bond == 1) return 125;
-		else if (bond == 2) return 114;
-		else if (bond == 3) return 103;
+	if (bond == 1) return 146;
+	else if (bond == 2) return 146;// 114;
+	else if (bond == 3) return 146;// 103;
 	}
 	else if (element == "Rh") {
 		if (bond == 1) return 125;
@@ -1567,6 +1925,32 @@ int covalentRadii(std::string element, int bond)
 	else if (element == "118") {
 		if (bond == 1) return 157;
 	}
+	else {
+		//this is not an atom, instead its a collection of atoms in an xyz file
+		int horizontalCovalentRadii = 0;
+		int verticalCovalentRadii = 0;
+		std::ifstream file(element); // Open the file # of hole location and element distribution combinations:
+		std::string line;
+		std::getline(file, line);//num atoms
+		std::getline(file, line);//horizontal_vertical
+		std::string hori = "";
+		std::string vert = "";
+		bool verttime = false;
+		//std::cout << line << std::endl;
+		for (int s = 0; s < line.size(); s++)
+		{
+			//std::cout << line[s] << std::endl;
+			if (line[s] == ' ') verttime = true;
+			else if (verttime) vert += line[s];
+			else hori += line[s];
+		}
+		file.close();
+		if (horizontal) return std::stoi(hori);
+		else return std::stoi(vert);
+
+		
+	
+		}
 	return 0;
 }
 
@@ -1610,10 +1994,82 @@ std::string atomicNumber(int num)
 		return "Cl";
 	case 18:
 		return "Ar";
+	case 19:
+		return "K";
+	case 20:
+		return "Ca";
+	case 21:
+		return "Sc";
+	case 22:
+		return "Ti";
+	case 23:
+		return "V";
+	case 24:
+		return "Cr";
+	case 25:
+		return "Mn";
 	case 26:
+		return "Fe";
+	case 27:
+		return "Co";
+	case 28:
+		return "Ni";
+	case 29:
 		return "Cu";
 	case 30:
 		return "Zn";
+	case 31:
+		return "Ga";
+	case 32:
+		return "Ge";
+	case 33:
+		return "As";
+	case 34:
+		return "Se";
+	case 35:
+		return "Br";
+	case 36:
+		return "Kr";
+	case 37:
+		return "Rb";
+	case 38:
+		return "Sr";
+	case 39:
+		return "Y";
+	case 40:
+		return "Zr";
+	case 41:
+		return "Nb";
+	case 42:
+		return "Mo";
+	case 43:
+		return "Tc";
+	case 44:
+		return "Ru";
+	case 45:
+		return "Rh";
+	case 46:
+		return "Pd";
+	case 47:
+		return "Ag";
+	case 48:
+		return "Cd";
+	case 49:
+		return "In";
+	case 50:
+		return "Sn";
+	case 51:
+		return "Sb";
+	case 52:
+		return "Te";
+	case 53:
+		return "I";
+	case 54:
+		return "Xe";
+	case 55:
+		return "Cs";
+	case 56:
+		return "Ba";
 	case 57:
 		return "La";
 	case 58:
@@ -1632,18 +2088,52 @@ std::string atomicNumber(int num)
 		return "Gd";
 	case 65:
 		return "Tb";
-	case 66: 
+	case 66:
 		return "Dy";
 	case 67:
 		return "Ho";
 	case 68:
 		return "Er";
 	case 69:
-		return "Th";
+		return "Tm";
 	case 70:
 		return "Yb";
 	case 71:
 		return "Lu";
+	case 72:
+		return "Hf";
+	case 73:
+		return "Ta";
+	case 74:
+		return "W";
+	case 75:
+		return "Re";
+	case 76:
+		return "Os";
+	case 77:
+		return "Ir";
+	case 78:
+		return "Pt";
+	case 79:
+		return "Au";
+	case 80:
+		return "Hg";
+	case 81:
+		return "Tl";
+	case 82:
+		return "Pb";
+	case 83:
+		return "Bi";
+	case 84:
+		return "Po";
+	case 85:
+		return "At";
+	case 86:
+		return "Rn";
+	case 87:
+		return "Fr";
+	case 88:
+		return "Ra";
 	case 89:
 		return "Ac";
 	case 90:
@@ -1672,10 +2162,40 @@ std::string atomicNumber(int num)
 		return "Md";
 	case 102:
 		return "No";
-	case 103: 
+	case 103:
 		return "Lr";
+	case 104:
+		return "Rf";
+	case 105:
+		return "Db";
+	case 106:
+		return "Sg";
+	case 107:
+		return "Bh";
+	case 108:
+		return "Hs";
+	case 109:
+		return "Mt";
+	case 110:
+		return "Ds";
+	case 111:
+		return "Rg";
+	case 112:
+		return "Cn";
+	case 113:
+		return "Nh";
+	case 114:
+		return "Fl";
+	case 115:
+		return "Mc";
+	case 116:
+		return "Lv";
+	case 117:
+		return "Ts";
+	case 118:
+		return "Og";
 	default:
-		return "todo";
+		return "Unknown";
 	}
 	return "todo";
 }
@@ -1914,6 +2434,9 @@ double picometersToAngstrom(int picometers)
 
 bool radialCriteria(structure& s, int percent)
 {
+
+
+
 	//std::cout << "RCp: " << s.set.size() << std::endl;
 	//bond requirement forces at least that number of covalent bonds per atom. recommended value is 1
 	/*there will be a radial critera based on covalentand van der waals radii.
@@ -1939,6 +2462,7 @@ bool radialCriteria(structure& s, int percent)
 					if (i == j && b == a) {
 					}
 					else {
+						
 						double diameterVDW = picometersToAngstrom(vanDerWaalsRadii(s.elements[i])) + picometersToAngstrom(vanDerWaalsRadii(s.elements[j]));
 						double diameterR1 = picometersToAngstrom(covalentRadii(s.elements[i], 1)) + picometersToAngstrom(covalentRadii(s.elements[j], 1));
 						double diameterR2 = picometersToAngstrom(covalentRadii(s.elements[i], 2)) + picometersToAngstrom(covalentRadii(s.elements[j], 2));
@@ -1951,6 +2475,7 @@ bool radialCriteria(structure& s, int percent)
 						//do not perform on the same atom
 						double dist = euclideanDistance(s.set[i][a], s.set[j][b]);
 
+						//std::cout << "atom " << a << " to " << b << " distance " << dist << ", diamterR1 - boundR1: " << diameterR1 - boundR1 << ", diameterR1 + boundR1: " << diameterR1 + boundR1 << std::endl;
 
 						if (dist < diameterVDW)
 						{
@@ -1984,13 +2509,16 @@ bool radialCriteria(structure& s, int percent)
 						}
 						//else if (bugging) std::cout << "outside of van der waals for " << s.elements[i] << a << " and " << s.elements[j] << b << " being longer than the van der waals radii," << picometersToAngstrom(vanDerWaalsRadii(s.elements[i])) << ", of " << s.elements[i] << a << " at " << dist << std::endl;
 
-
+						
 					}
-
+					
 				}
+				
 			}
+			
 
 		}
+		
 	}
 	//all passed, return true
 	return true;
@@ -2020,6 +2548,7 @@ bool covalentCriteria(structure* s, int percent)
 					if (i == j && b == a) {
 					}
 					else {
+
 						double diameterR1 = picometersToAngstrom(covalentRadii(s->elements[i], 1)) + picometersToAngstrom(covalentRadii(s->elements[j], 1));
 						double diameterR2 = picometersToAngstrom(covalentRadii(s->elements[i], 2)) + picometersToAngstrom(covalentRadii(s->elements[j], 2));
 						if (picometersToAngstrom(covalentRadii(s->elements[i], 2)) == 0 || picometersToAngstrom(covalentRadii(s->elements[j], 2)) == 0) diameterR2 = 0;
@@ -2033,8 +2562,10 @@ bool covalentCriteria(structure* s, int percent)
 
 						double diameterVDW = picometersToAngstrom(vanDerWaalsRadii(s->elements[i])) + picometersToAngstrom(vanDerWaalsRadii(s->elements[j]));
 							bool accept = false;
+							//std::cout << "atom " << a << " to " << b << " distance " << dist << ", diamterR1 - boundR1: " << diameterR1 - boundR1 << ", diameterR1 + boundR1: " << diameterR1 + boundR1 << std::endl;
+
 							if (dist > diameterR1 - boundR1) accept = true;
-							else {
+							else if(false) {
 								if (diameterR2 != 0)
 								{
 									if (dist > diameterR2 - boundR2) accept = true;
@@ -2077,21 +2608,25 @@ bool covalentCriteria(structure* s, int percent)
 bool bondingRequirement(structure* s, int percent, bool numBonds)
 {
 	// step 1: produce a graph of the structure where nodes are atoms and edges represent covalent bonds
-	
 	//get number of atoms
 	int natoms = 0;
-	for (int i = 0; i < s->composition.size(); i++) natoms += s->composition[i];
+	for (int i = 0; i < s->set.size(); i++) natoms += s->set[i].size();
 	if (natoms == 0) {
 		std::cout << "cryptid pointer error detected from createXnew loop in BHC algo" << std::endl;
+		/*
+		TODO FIX THIS POINTER ERROR. THe software works with this unfixed, so its ok for now.
+
+		*/
 		return 0; //glitch case, not understood pointer error where structure is deleted between loops in basin hopping
 	}
+	//else std::cout << "did not have a cryptid pointer error" << std::endl;
 	if (numBonds == 0) return 1;
 	bool** graph = new bool*[natoms];
 	for (int i = 0; i < natoms; i++) graph[i] = new bool[natoms];
 	int index_a = 0;
-	for (int i = 0; i < s->composition.size(); i++)
+	for (int i = 0; i < s->set.size(); i++)
 	{
-		for (int a = 0; a < s->composition[i]; a++)
+		for (int a = 0; a < s->set[i].size(); a++)
 		{
 			double radiusA1 = picometersToAngstrom(covalentRadii(s->elements[i], 1));
 			double radiusA2 = picometersToAngstrom(covalentRadii(s->elements[i], 2));
@@ -2105,8 +2640,8 @@ bool bondingRequirement(structure* s, int percent, bool numBonds)
 				{
 					if (i == j && b == a) {
 						graph[index_a][index_b] = 0;//same atom
-					}else{
 
+					}else{
 						double radiusB1 = picometersToAngstrom(covalentRadii(s->elements[j], 1));
 						double radiusB2 = picometersToAngstrom(covalentRadii(s->elements[j], 2));
 						double radiusB3 = picometersToAngstrom(covalentRadii(s->elements[j], 3));
@@ -2122,7 +2657,7 @@ bool bondingRequirement(structure* s, int percent, bool numBonds)
 						{
 							bond = true;
 						}
-						else if (radiusB2 != 0 && radiusA2 != 0) {
+						else if (false) {
 							double diameterR2 = radiusA2 + radiusB2;
 							double boundR2 = diameterR2 * ((double)percent / (double)100);
 							if (dist < diameterR2 + boundR2 && dist > diameterR2 - boundR2)
@@ -2154,7 +2689,6 @@ bool bondingRequirement(structure* s, int percent, bool numBonds)
 	for (int b = 0; b < natoms; b++) visited[b] = false;
 	std::queue<int> atomQueue;
 	atomQueue.push(0);
-
 	while (!atomQueue.empty())
 	{
 		int a = atomQueue.front();
@@ -2188,7 +2722,7 @@ bool bondingRequirement(structure* s, int percent, bool numBonds)
 		}
 		*/
 	}
-	//step 3: number of bonds requirement 
+	//step 3: number of bonds requirement
 	bool bondRequirement = true;
 	for (int a = 0; a < natoms; a++)
 	{
@@ -2204,6 +2738,7 @@ bool bondingRequirement(structure* s, int percent, bool numBonds)
 	delete[] graph;
 	delete[] visited;
 	//step 5: return
+	//std::cout << connected << bondRequirement << std::endl;
 	return (connected && bondRequirement);
 }
 
@@ -2384,7 +2919,7 @@ structure* seedFromGroupTheory(std::vector<int> composition, std::vector<std::st
 	bool Hallowed = true;
 	//figure out if h symmetry is allowed
 	//we must ensure only one element has an odd number of atoms to be placed along the central rotational axis
-
+	
 	//if(remove) n = 6;
 
 	int nodd = 0;
@@ -3269,7 +3804,7 @@ std::vector<atom> partialSymmetrySet(int composition,int n, bool h, double rmax,
 		if (s % 2 == 1)
 		{
 			celementCRA.push_back(std::tuple<double, double, double>(0, 0, 0));
-			for (int i = 1; i < s; i++)
+			for (int i = 0; i < (s-1)/2; i++)
 			{
 
 				double r = rmax * double(rand()) / double(RAND_MAX);
@@ -3432,7 +3967,7 @@ std::vector<atom> partialSymmetrySet(partialSymmetryDescriptor descriptor, doubl
 		if (s % 2 == 1)
 		{
 			celementCRA.push_back(std::tuple<double, double, double>(0, 0, 0));
-			for (int i = 1; i < s; i++)
+			for (int i = 0; i < (s-1)/2; i++)
 			{
 
 				double r = rmax * double(rand()) / double(RAND_MAX);
@@ -3525,7 +4060,21 @@ partialSymmetryDescriptor::~partialSymmetryDescriptor()
 	//delete[] holeLocations;
 }
 
-std::vector<structure*> seedsWithPartialSymmetry(bool extraHoles,bool alignHoles,bool variantSymmetry, double nMultiplier,  std::vector<int> composition, std::vector<std::string> elements, double rmax, double radialCriteriaPercent, int bondRequirement = -1, int criteriaIterations = 10000)
+std::vector<structure*> seedsWithPartialSymmetry(bool extraHoles, bool alignHoles, bool variantSymmetry, double nMultiplier, std::vector<int> composition, std::vector<std::string> elements, double rmax, double radialCriteriaPercent, int bondRequirement = -1, int criteriaIterations = 10000, int nMin = 0)
+{
+	std::vector<int> nValues = {};
+	int Cmax = 0;
+	for (int e = 0; e < composition.size(); e++) if (composition[e] > Cmax) Cmax = composition[e];
+	int maxN = int(Cmax * nMultiplier);
+	for (int n = maxN; n > nMin; n--)
+	{
+		nValues.push_back(n);
+	}
+	return seedsWithPartialSymmetry(extraHoles, alignHoles, variantSymmetry, nValues, composition, elements, rmax, radialCriteriaPercent, bondRequirement, criteriaIterations);
+
+}
+
+std::vector<structure*> seedsWithPartialSymmetry(bool extraHoles,bool alignHoles,bool variantSymmetry, std::vector<int> nValues,  std::vector<int> composition, std::vector<std::string> elements, double rmax, double radialCriteriaPercent, int bondRequirement = -1, int criteriaIterations = 10000)
 {
 	std::vector<structure*> retValue;
 	
@@ -3537,11 +4086,11 @@ std::vector<structure*> seedsWithPartialSymmetry(bool extraHoles,bool alignHoles
 
 	int Cmax = 0;
 	for (int e = 0; e < composition.size(); e++) if (composition[e] > Cmax) Cmax = composition[e];
-	int maxN = int(Cmax * nMultiplier);
 	std::vector<std::vector<partialSymmetryDescriptor>> elementDescriptorSets = {};
 	for (int e = 0; e < composition.size(); e++) elementDescriptorSets.push_back({});
-	for (int n = maxN; n > 0; n--)
+	for (int it = 0; it < nValues.size(); it++)
 	{
+		int n = nValues[it];
 		bool Hallowed = true;
 		int nodd = 0;
 		for (int i = 0; i < composition.size(); i++)
@@ -3559,7 +4108,7 @@ std::vector<structure*> seedsWithPartialSymmetry(bool extraHoles,bool alignHoles
 			//the minimum number of holes must be n - composition.size() but can be higher if atoms are put on the CRA
 			int holes = 0;
 			if (n > composition[e]) holes += n - composition[e];
-			std::vector<int> holeValues = {holes};
+			std::vector<int> holeValues = {0,holes};
 			if (extraHoles) for (int i = 1; i <= composition[e]; i++) holeValues.push_back(holes + i);
 
 			//std::vector<partialSymmetryDescriptor> descriptorSets = {};
@@ -3571,8 +4120,14 @@ std::vector<structure*> seedsWithPartialSymmetry(bool extraHoles,bool alignHoles
 				
 				*/
 				std::vector<bool*> holeLocations = {};
-				if (!alignHoles)holeLocations = enumeration(n, holeValues[i]);
-				else holeLocations = alignedEnumeration(n, holeValues[i]);
+				if (e == 0) {
+					if (!alignHoles)holeLocations = enumeration(n, holeValues[i], true);
+					else holeLocations = alignedEnumeration(n, holeValues[i], true);
+				}
+				else {
+					if (!alignHoles)holeLocations = enumeration(n, holeValues[i], false);
+					else holeLocations = alignedEnumeration(n, holeValues[i], false);
+				}
 				std::cout << "hole locations size for n: " << n << ", holes: "<< holeValues[i] << ":" << holeLocations.size() << std::endl;
 				for (std::vector<bool*>::iterator pit = holeLocations.begin(); pit != holeLocations.end(); pit++) pointers.push_back(*pit);
 				if (Hallowed)
@@ -3616,7 +4171,7 @@ std::vector<structure*> seedsWithPartialSymmetry(bool extraHoles,bool alignHoles
 
 			for (int i = 0; i < numStructures; i++)
 			{
-				if (i % 1000 == 0) std::cout << "calculated so far: " << i << std::endl;
+				if (i % 25 == 0) std::cout << "calculated so far: " << i << ", structures found: " << retValue.size() << std::endl;
 				//i = 84241;
 				//std::cout << "WPI 1" << std::endl;
 				structure* testStruc = nullptr;
@@ -3722,7 +4277,7 @@ std::vector<structure*> seedsWithPartialSymmetry(bool extraHoles,bool alignHoles
 
 		for (int i = 0; i < numStructures; i++)
 		{
-			if (i % 1000 == 0) std::cout << "calculated so far: " << i << std::endl;
+			//if (i % 1000 == 0) std::cout << "calculated so far: " << i << std::endl;
 			//i = 84241;
 			//std::cout << "WPI 1" << std::endl;
 			structure* testStruc = nullptr;
@@ -3805,6 +4360,171 @@ std::vector<structure*> seedsWithPartialSymmetry(bool extraHoles,bool alignHoles
 	//std::cout << "internal pss size: " << retValue.size() << std::endl;
 	return retValue;
 }
+std::vector<structure*> seedsWithSpecificSymmetry(bool extraHoles, bool alignHoles,int n, bool h, std::vector<int> composition, std::vector<std::string> elements, double rmax, double radialCriteriaPercent, int bondRequirement = -1, int criteriaIterations = 10000)
+{
+	std::vector<structure*> retValue;
+
+	std::vector<bool*> pointers;
+	/*
+	Features to add in the future:
+	-Combinations of elements into the same symmetry descriptor
+	*/
+
+	int Cmax = 0;
+	for (int e = 0; e < composition.size(); e++) if (composition[e] > Cmax) Cmax = composition[e];
+	std::vector<std::vector<partialSymmetryDescriptor>> elementDescriptorSets = {};
+	for (int e = 0; e < composition.size(); e++) elementDescriptorSets.push_back({});
+	
+		
+
+		//create a set for each element
+		for (int e = 0; e < composition.size(); e++)
+		{
+			//the minimum number of holes must be n - composition.size() but can be higher if atoms are put on the CRA
+			int holes = 0;
+			if (n > composition[e]) holes += n - composition[e];
+			std::vector<int> holeValues = { 0,holes };
+			if (extraHoles) for (int i = 1; i <= composition[e]; i++) holeValues.push_back(holes + i);
+
+			//std::vector<partialSymmetryDescriptor> descriptorSets = {};
+
+			for (int i = 0; i < holeValues.size(); i++) {
+
+				/*
+				Todo, unfortunately we actually need to save all these parameters so that these sets can be continuously regenerated later :(
+
+				*/
+				std::vector<bool*> holeLocations = {};
+				if (e == 0){
+					if (!alignHoles)holeLocations = enumeration(n, holeValues[i],true);
+					else holeLocations = alignedEnumeration(n, holeValues[i],true);
+				}else{
+					if (!alignHoles)holeLocations = enumeration(n, holeValues[i],false);
+					else holeLocations = alignedEnumeration(n, holeValues[i],false);
+				}
+				std::cout << "hole locations size for n: " << n << ", holes: " << holeValues[i] << ":" << holeLocations.size() << std::endl;
+				for (std::vector<bool*>::iterator pit = holeLocations.begin(); pit != holeLocations.end(); pit++) pointers.push_back(*pit);
+
+					for (std::vector<bool*>::iterator it = holeLocations.begin(); it != holeLocations.end(); it++)
+					{
+						elementDescriptorSets[e].push_back(partialSymmetryDescriptor(composition[e], n, h, holeValues[i], *it));
+					}
+			}
+			//elementDescriptorSets[e].push_back(descriptorSets);
+		}
+		/*
+		COMPOUNDS
+
+		todo, for now this is unnecessary.
+		A future feature which will combine and divide elements into symmetries
+		*/
+
+			int numStructures = 1;
+			for (int i = 0; i < elementDescriptorSets.size(); i++) {
+				numStructures *= elementDescriptorSets[i].size();
+			}
+			std::cout << "Number of structure types from partial symmetry " << numStructures << std::endl;
+
+			for (int i = 0; i < numStructures; i++)
+			{
+				if (i % 1000 == 0) std::cout << "calculated so far: " << i << std::endl;
+				//i = 84241;
+				//std::cout << "WPI 1" << std::endl;
+				structure* testStruc = nullptr;
+				int iter = 0;
+				bool found = false;
+				//std::cout << "0 " << std::endl;
+				std::vector<int> iterators = {};
+				for (int e = 0; e < composition.size(); e++) iterators.push_back(0);
+				//std::cout << "WPI 2" << std::endl;
+				//std::cout << "1 " << std::endl;
+				for (int it = 0; it < i; it++)
+				{
+					//std::cout << "WPI 3 " << it << std::endl;
+					int e = 0;
+					iterators[e] += 1;
+					//std::cout << "it " << it << std::endl;
+					while (iterators[e] >= elementDescriptorSets[e].size())
+					{
+						//std::cout << "moving up at " << it << std::endl;
+						iterators[e] = 0;
+						e++;
+						iterators[e] += 1;
+					}
+
+				}
+
+
+
+				//std::cout << "2 " << std::endl;
+				//std::cout << "current iterators: ";
+				//for (int it = 0; it < iterators.size(); it++) std::cout << iterators[it] << " ";
+				//std::cout << std::endl;
+				//std::cout << "starting do loop for " << i << std::endl;
+				do {
+					std::vector<std::vector<atom>> structureSets;
+
+					//std::cout << "a" << std::endl;
+					for (int e = 0; e < composition.size(); e++)
+					{
+						//std::cout << "loading PSD for " << elements[e] << std::endl;
+						//elementDescriptorSets[e][iterators[e]].print();
+						/*
+						the setOfE is nonsense
+						. we need to check that the correct amount of atoms is being chosen
+						*/
+						std::vector<atom> setOfE = partialSymmetrySet(elementDescriptorSets[e][iterators[e]], rmax);
+						//std::cout << "for " << elements[e] << ":" << setOfE.size();
+						structureSets.push_back(setOfE);
+					}
+					//std::cout << "b" << std::endl;
+					if (testStruc != nullptr) delete testStruc;
+					/*
+					What is being passed to structure is nonsense.
+					*/
+
+					testStruc = new structure(structureSets, elements);
+					//std::cout << "c" << std::endl;
+					//std::cout << "radial criteria check " << std::endl;
+					//std::cout << "structure sets size: " << structureSets.size() << std::endl;
+					//testStruc->print();
+					if (radialCriteria(*testStruc, radialCriteriaPercent))
+					{
+						//std::cout << "d" << std::endl;
+						if (bondingRequirement(testStruc, radialCriteriaPercent, bondRequirement)) found = true;
+						else found = false;
+					}
+					else found = false;
+					//std::cout << "e" << std::endl;
+					//found = true;
+					iter++;
+				} while (!found && iter < criteriaIterations);
+
+				//std::cout << "ending do loop for " << i << std::endl;
+
+				//std::cout << "structure search while loop over with " << iter << std::endl;
+				if (iter < criteriaIterations) {
+					retValue.push_back(testStruc);
+					//std::cout << "structure found" << std::endl;
+					//testStruc->print();
+				}
+				else {
+					delete testStruc;
+					//std::cout << "symmetry failed moving on" << std::endl;
+				}
+
+			}
+			elementDescriptorSets = {};
+			for (int e = 0; e < composition.size(); e++) elementDescriptorSets.push_back({});
+
+	/*
+	COMBINES
+
+	*/
+	for (std::vector<bool*>::iterator pit = pointers.begin(); pit != pointers.end(); pit++) delete[] * pit;
+	//std::cout << "internal pss size: " << retValue.size() << std::endl;
+	return retValue;
+}
 
 
 structure* getSeedFromSymmetryMode(char mode, std::vector<int> composition, std::vector<std::string> elements, double rmax,int call, std::vector<std::pair<int, bool>> symmetries )
@@ -3813,6 +4533,7 @@ structure* getSeedFromSymmetryMode(char mode, std::vector<int> composition, std:
 	switch (mode)
 	{
 	case 'i':
+		//i for iterate through the possible symmetries
 		//i for iterate through the possible symmetries
 		retValue = seedFromPossibleSymmetries(symmetries, composition, elements, rmax, call);
 		break;
@@ -3825,7 +4546,13 @@ structure* getSeedFromSymmetryMode(char mode, std::vector<int> composition, std:
 		//symetrical seed with random symmetry. g for group theory seed
 		break;
 	case 'n':
-		retValue = new structure(rmax, rmax, rmax, composition, elements);
+		retValue = randomSeedInRadius(rmax, composition, elements);
+		//std::cout << "attempting to make seed" << std::endl;
+		//retValue = randomSeedInRadiusFromRadialCriteria(rmax, composition, elements, 20);
+		//std::cout << "seedmade" << std::endl;
+		//retValue=	new structure(rmax, rmax, rmax, composition, elements);//causes cryptid pointer errors
+		//std::cout << "PRINTING SEED" << std::endl;
+		//retValue->print();
 		//no symmetry
 		break;
 	}
@@ -3845,6 +4572,9 @@ structure* getSymmetricaSeed(char mode, std::vector<int> composition, std::vecto
 		//symetrical seed with random symmetry
 		//no symmetry
 		*/
+		/*
+		TODO: there may be something wrong with the following loops, i think it is possible to get stuck in an infinite loop if radial criteria is passing while bonding requirement is not but this can only happen on iteration 1. flip from do while to normal while to fix.
+		*/
 		do {
 			//s = seedFromGroupTheory(composition, elements, rlimit);
 			s = getSeedFromSymmetryMode(mode, composition, elements, rmax, call, symmetries);
@@ -3863,7 +4593,7 @@ structure* getSymmetricaSeed(char mode, std::vector<int> composition, std::vecto
 	return s;
 }
 
-std::vector<bool*> enumeration(int size, int totalValue)
+std::vector<bool*> enumeration(int size, int totalValue, bool initial)
 {
 	//base cases
 	if (totalValue > size) return {};
@@ -3879,35 +4609,60 @@ std::vector<bool*> enumeration(int size, int totalValue)
 		for (int i = 0; i < size; i++) b1[i] = 0;
 		return { b1 };
 	}
-
-
-	//other cases
-	std::vector<bool*> oneLess = enumeration(size - 1, totalValue - 1);
-	std::vector<bool*> zeroLess = enumeration(size - 1, totalValue);
-
 	std::vector<bool*> retVal;
-	for (std::vector<bool*>::iterator it = oneLess.begin(); it != oneLess.end(); it++)
+
+	if (initial)
 	{
-		bool* newBool = new bool[size];
-		for (int i = 0; i < size - 1; i++) newBool[i] = (*it)[i];
-		delete[](*it);
-		newBool[size - 1] = 1;
-		retVal.push_back(newBool);
+		std::vector<bool*> uninitialized = enumeration(size - 1, totalValue - 1, false);
+		for (std::vector<bool*>::iterator it = uninitialized.begin(); it != uninitialized.end(); it++)
+		{
+			bool* newBool = new bool[size];
+			for (int i = 0; i < size - 1; i++) newBool[i] = (*it)[i];
+			delete[](*it);
+			newBool[size - 1] = 1;
+			retVal.push_back(newBool);
+		}
+
 	}
-	for (std::vector<bool*>::iterator it = zeroLess.begin(); it != zeroLess.end(); it++)
-	{
-		bool* newBool = new bool[size];
-		for (int i = 0; i < size - 1; i++) newBool[i] = (*it)[i];
-		delete[](*it);
-		newBool[size - 1] = 0;
-		retVal.push_back(newBool);
+	else {
+
+		//other cases
+		std::vector<bool*> oneLess = enumeration(size - 1, totalValue - 1, false);
+		std::vector<bool*> zeroLess = enumeration(size - 1, totalValue, false);
+
+
+		for (std::vector<bool*>::iterator it = oneLess.begin(); it != oneLess.end(); it++)
+		{
+			bool* newBool = new bool[size];
+			for (int i = 0; i < size - 1; i++) newBool[i] = (*it)[i];
+			delete[](*it);
+			newBool[size - 1] = 1;
+			retVal.push_back(newBool);
+		}
+		for (std::vector<bool*>::iterator it = zeroLess.begin(); it != zeroLess.end(); it++)
+		{
+			bool* newBool = new bool[size];
+			for (int i = 0; i < size - 1; i++) newBool[i] = (*it)[i];
+			delete[](*it);
+			newBool[size - 1] = 0;
+			retVal.push_back(newBool);
+		}
 	}
 
 	return retVal;
 }
 
-std::vector<bool*> alignedEnumeration(int size, int totalValue)
+std::vector<bool*> alignedEnumeration(int size, int totalValue, bool initial)
 {
+	if (totalValue == 0)
+	{
+		bool* newSet = new bool[size];
+		for (int i = 0; i < size; i++)
+		{
+			newSet[i] = 0;
+		}
+		return {newSet};
+	}
 	//this one just returns them all in a circle only
 	
 
@@ -3921,6 +4676,7 @@ std::vector<bool*> alignedEnumeration(int size, int totalValue)
 			else newSet[i + j] = 1;
 		}
 		retVal.push_back(newSet);
+		if (initial) i = size;
 	}
 
 	return retVal;
@@ -3969,7 +4725,7 @@ void writeToXyz(std::vector<structure*> structures,std::string outputName)
 
 		//outFile << "# Structure OBJ File" << std::endl;
 
-		outFile << std::to_string(natoms) << "\n" << "Frame " << std::to_string(s) << "\n";
+		outFile << std::to_string(natoms) << "\n" << "Frame " << std::to_string(s) <<  " ,Energy: " << std::setprecision(std::numeric_limits<double>::digits10 + 1) << cS->energy << " , time: " << cS->time << "\n";
 		for (int i = 0; i < cS->set.size(); i++)
 		{
 			for (int j = 0; j < cS->set[i].size(); j++)
@@ -3988,7 +4744,7 @@ void writeToXyz(std::vector<structure*> structures,std::string outputName)
 
 }
 
-std::vector<structure*> getSeeds(std::vector<int> composition, std::vector<std::string> elements, double radius, double radialCriteriaPercent, int bondRequirement,int criteriaIterations,bool partialSymmetry, bool extraHoles, bool alignHoles, bool variantSymmetry, double nMultiplier)
+std::vector<structure*> getSeeds(std::vector<int> composition, std::vector<std::string> elements, double radius, double radialCriteriaPercent, int bondRequirement,int criteriaIterations,bool partialSymmetry, bool extraHoles, bool alignHoles, bool variantSymmetry, double nMultiplier, int nMin,std::vector<int> nValues)
 {
 	std::vector<structure*> seeds;
 	std::vector<structure*> symmetrySeeds = {};
@@ -4053,7 +4809,10 @@ std::vector<structure*> getSeeds(std::vector<int> composition, std::vector<std::
 	/*
 	Pure symmetry ove
 	*/
-	if(partialSymmetry) partialSymmetrySeeds = seedsWithPartialSymmetry(extraHoles,alignHoles,variantSymmetry,nMultiplier,composition,elements,radius, radialCriteriaPercent, bondRequirement, criteriaIterations);
+	if (partialSymmetry) {
+		if(nValues.size() == 0) partialSymmetrySeeds = seedsWithPartialSymmetry(extraHoles, alignHoles, variantSymmetry, nMultiplier, composition, elements, radius, radialCriteriaPercent, bondRequirement, criteriaIterations, nMin);
+		else partialSymmetrySeeds = seedsWithPartialSymmetry(extraHoles, alignHoles, variantSymmetry, nValues, composition, elements, radius, radialCriteriaPercent, bondRequirement, criteriaIterations);
+	}
 	/*
 	Add a no symmetry mode?
 	*/
@@ -4080,32 +4839,56 @@ std::vector<structure*> structuresFromXYZ(std::string fileName)
 		if (natoms > 0)
 		{
 			std::getline(file, in);//frame number
+			//try read out the energy
+			int spaces = 0;
+			std::string energy = "";
+			for (int i = 0; i < in.size(); i++)
+			{
+				if (in[i] == ' ') spaces++;
+				else {
+					if (spaces == 3) energy += in[i];
+				}
+			}
+			double nrg = DBL_MAX;
+			std::cout << energy << std::endl;
+			if(energy.size() > 0)nrg = std::stod(energy);
 			std::vector<std::pair<std::string, atom>> readAtoms;
 			for (int i = 0; i < natoms; i++)
 			{
 				std::getline(file, in);
+				//std::cout << in << std::endl;
 				int endOfElement = 0;
 				int endOfX = 0;
 				int endOfY = 0;
 				int endOfZ = 0;
 				int endOfLine = 0;
+				int whitespace = 0;
 				for (int c = 0; c < in.size(); c++)
 				{
 					if (in[c] == ' ')
 					{
-						if (endOfElement > 0)
-						{
-							if (endOfX > 0)
-							{
-								if (endOfY >  0)
-								{
-									endOfZ = c;
-								}
-								else endOfY = c;
+						bool skipc = false;
+						if (c != in.size() - 1) {
+							if (in[c + 1] == ' ') {
+								skipc = true;//more whitespace
+								whitespace++;
 							}
-							else endOfX = c;
 						}
-						else endOfElement = c;
+						if (!skipc) {
+							if (endOfElement > 0)
+							{
+								if (endOfX > 0)
+								{
+									if (endOfY > 0)
+									{
+										endOfZ = c;
+									}
+									else endOfY = c;
+								}
+								else endOfX = c;
+							}
+							else endOfElement = c - whitespace;
+						}
 					}
 				}
 				endOfZ = in.size();
@@ -4116,7 +4899,6 @@ std::vector<structure*> structuresFromXYZ(std::string fileName)
 				std::pair<std::string, atom> eap = std::pair<std::string, atom>(element, atom(x, y, z));
 				readAtoms.push_back(eap);
 			}
-
 			std::set<std::string> elementSet = {};
 			for (std::vector<std::pair<std::string, atom>>::iterator it = readAtoms.begin(); it != readAtoms.end(); it++)
 			{
@@ -4131,7 +4913,6 @@ std::vector<structure*> structuresFromXYZ(std::string fileName)
 				composition.push_back(0);
 				atomSets.push_back({});
 			}
-			
 			for (std::vector<std::pair<std::string, atom>>::iterator it = readAtoms.begin(); it != readAtoms.end(); it++)
 			{
 				int e = 0;
@@ -4145,6 +4926,7 @@ std::vector<structure*> structuresFromXYZ(std::string fileName)
 				}
 			}
 			structure* struc = new structure(atomSets, elements);
+			struc->energy = nrg;
 			retval.push_back(struc);
 		}
 	}
@@ -4153,3 +4935,1547 @@ std::vector<structure*> structuresFromXYZ(std::string fileName)
 }
 
 bool energyCompare(structure* a, structure* b) { return a->energy < b->energy; };
+
+
+structure* randomSeedInRadius(double radius, std::vector<int> composition, std::vector<std::string> elements)
+{
+	std::vector<std::vector<atom>> set;
+	for (int e = 0; e < composition.size(); e++)
+	{
+		std::vector<atom > element;
+		for (int a = 0; a < composition[e]; a++)
+		{
+			double r = radius*double(rand()) / double(RAND_MAX);
+			double phi = 360.0 * double(rand()) / double(RAND_MAX);
+			double theta = 360.0 * double(rand()) / double(RAND_MAX);
+			double x = radius * sin(theta) * cos(phi);
+			double y = radius * sin(theta) * sin(phi);
+			double z = radius * cos(theta);
+			element.push_back(atom(x, y, z));
+		}
+		set.push_back(element);
+	}
+	structure* retValue = new structure(set, elements);
+	return retValue;
+}
+
+structure* randomSeedInRadiusFromRadialCriteria(double radius, std::vector<int> composition, std::vector<std::string> elements,double radialCriteriaPercent)
+{
+	std::vector<std::vector<atom>> set;
+	std::vector<atom> allatoms;
+	for (int e = 0; e < composition.size(); e++)
+	{
+		std::vector<atom > element;
+		for (int a = 0; a < composition[e]; a++)
+		{
+			bool totalaccept = false;
+			atom catom;
+			while (!totalaccept) {
+				totalaccept = true;
+				double r = radius * double(rand()) / double(RAND_MAX);
+				double phi = 360.0 * double(rand()) / double(RAND_MAX);
+				double theta = 360.0 * double(rand()) / double(RAND_MAX);
+				double x = radius * sin(theta) * cos(phi);
+				double y = radius * sin(theta) * sin(phi);
+				double z = radius * cos(theta);
+
+				/*
+				Check that the atom will fit in
+				*/
+				catom = atom(x, y, z);
+				
+				int compositionIterator = 0;
+				int atomIterator = 0;
+				std::string celement = elements[0];
+				for (int b = 0; b < allatoms.size(); b++)
+				{
+					
+
+					double diameterVDW = picometersToAngstrom(vanDerWaalsRadii(elements[e])) + picometersToAngstrom(vanDerWaalsRadii(celement));
+					double diameterR1 = picometersToAngstrom(covalentRadii(elements[e], 1)) + picometersToAngstrom(covalentRadii(celement, 1));
+					double diameterR2 = picometersToAngstrom(covalentRadii(elements[e], 2)) + picometersToAngstrom(covalentRadii(celement, 2));
+					if (picometersToAngstrom(covalentRadii(elements[e], 2)) == 0 || picometersToAngstrom(covalentRadii(celement, 2)) == 0) diameterR2 = 0;
+					double diameterR3 = picometersToAngstrom(covalentRadii(elements[e], 3)) + picometersToAngstrom(covalentRadii(celement, 3));
+					if (picometersToAngstrom(covalentRadii(elements[e], 3)) == 0 || picometersToAngstrom(covalentRadii(celement, 3)) == 0) diameterR2 = 0;
+					double boundR1 = diameterR1 * ((double)radialCriteriaPercent / (double)100);
+					double boundR2 = diameterR2 * ((double)radialCriteriaPercent / (double)100);
+					double boundR3 = diameterR3 * ((double)radialCriteriaPercent / (double)100);
+					//do not perform on the same atom
+					double dist = euclideanDistance(allatoms[b], catom);
+					bool accept = false;
+
+					if (dist < diameterVDW)
+					{
+
+						if (dist > diameterR1 - boundR1 && dist < diameterR1 + boundR1) accept = true;
+						else {
+							if (diameterR2 != 0)
+							{
+								if (dist > diameterR2 - boundR2 && dist < diameterR2 + boundR2) accept = true;
+								else {
+									if (diameterR3 != 0)
+									{
+										if (dist > diameterR3 - boundR3 && dist < diameterR3 + boundR3) accept = true;
+									}
+								}
+							}
+						}
+					}
+					if (!accept) totalaccept = false;
+					//else if (bugging) std::cout << "outside of van der waals for " << s.elements[i] << a << " and " << s.elements[j] << b << " being longer than the van der waals radii," << picometersToAngstrom(vanDerWaalsRadii(s.elements[i])) << ", of " << s.elements[i] << a << " at " << dist << std::endl;
+
+
+					atomIterator++;
+					if (atomIterator >= composition[compositionIterator])
+					{
+						atomIterator = 0;
+						compositionIterator++;
+						celement = elements[compositionIterator];
+					}
+
+				}
+			}
+
+			element.push_back(catom);
+			allatoms.push_back(catom);
+		}
+		set.push_back(element);
+	}
+	structure* retValue = new structure(set, elements);
+	return retValue;
+}
+
+std::vector<int *> multinomialCoefficient(int n, std::vector<int> k)
+{
+	
+		//base cases
+	if (n == 1)
+	{
+		int remainder = 0;
+		for (int i = 0; i < k.size(); i++) if (k[i] == 1) remainder = i;
+		int* arrangement = new int[1];
+		arrangement[0] = remainder;
+		return {arrangement};
+	}
+	std::vector<int*> retVal = {};
+	for (int ki = 0; ki < k.size(); ki++)
+	{
+		if (k[ki] > 0)
+		{
+			std::vector<int> kprev = k;
+			kprev[ki]--;
+			std::vector<int*> prev = multinomialCoefficient(n - 1, kprev);
+			for (std::vector<int*>::iterator pit = prev.begin(); pit != prev.end(); pit++)
+			{
+				int* arrangement = new int[n];
+				for (int i = 0; i < n - 1; i++) arrangement[i] = (*pit)[i];
+				delete[](*pit);
+				arrangement[n - 1] = ki;
+				retVal.push_back(arrangement);
+			}
+		}
+	}
+	return retVal;
+
+
+}
+
+bool connectednessRequirement(structure* s, int percent, bool numBonds)
+{
+	//unlike bonding requirement, this ensures atoms are within covalent criterias upper bound, not lower bound
+
+	int natoms = 0;
+	for (int i = 0; i < s->set.size(); i++) natoms += s->set[i].size();
+	//std::cout << "natoms: " << natoms << std::endl;
+	if (natoms == 0) {
+		std::cout << "cryptid pointer error detected from createXnew loop in BHC algo" << std::endl;
+		return 0; 
+	}
+	if (natoms == 1) return 1;
+	if (numBonds == 0) {
+		return 1;
+		
+	}
+	bool** graph = new bool* [natoms];
+	for (int i = 0; i < natoms; i++) graph[i] = new bool[natoms];
+	int index_a = 0;
+	for (int i = 0; i < s->set.size(); i++)
+	{
+		for (int a = 0; a < s->set[i].size(); a++)
+		{
+			double radiusA1 = picometersToAngstrom(covalentRadii(s->elements[i], 1));
+			int index_b = 0;
+			for (int j = 0; j < s->set.size(); j++)
+			{
+				for (int b = 0; b < s->set[j].size(); b++)
+				{
+					if (i == j && b == a) {
+						graph[index_a][index_b] = 0;//same atom
+					}
+					else {
+						double radiusB1 = picometersToAngstrom(covalentRadii(s->elements[j], 1));
+						
+
+						double diameterR1 = radiusA1 + radiusB1;
+						double boundR1 = diameterR1 * ((double)percent / (double)100);
+						double dist = euclideanDistance(s->set[i][a], s->set[j][b]);
+
+						bool bond = false;
+
+						if (dist < diameterR1 + boundR1)
+						{
+							//std::cout << "dist: " << dist << " diameterR1: " << diameterR1 << " boindR1: " << boundR1 << std::endl;
+							bond = true;
+						}
+						
+						graph[index_a][index_b] = bond;
+						//if(!bond) std::cout << "a: " << index_a << " b: " << index_b << std::endl;
+					}
+					index_b++;
+				}
+			}
+
+			index_a++;
+		}
+	}
+	//step 2: ensure the graph is connected
+	bool* visited = new bool[natoms];
+	for (int b = 0; b < natoms; b++) visited[b] = false;
+	std::queue<int> atomQueue;
+	atomQueue.push(0);
+	while (!atomQueue.empty())
+	{
+		int a = atomQueue.front();
+		visited[a] = true;
+		//std::cout << "visited" << std::endl;
+		for (int b = 0; b < natoms; b++)
+		{
+			if (graph[a][b] && !visited[b]) atomQueue.push(b);
+		}
+
+
+		//remove the current atom
+		atomQueue.pop();
+	}
+	//ensuring all atoms were visited will ensure the graph is connected
+	bool connected = true;
+	for (int b = 0; b < natoms; b++) if (!visited[b]) {
+		//std::cout << "proof of check 1" << std::endl;
+		connected = false;
+		//get information about the disconnection:
+		/*std::cout << "atom: " << b << " not connected";
+		int tempb = b + 1;
+		for (int i = 0; i < s->composition.size(); i++)
+		{
+			if (tempb > s->composition[i])
+			{
+				tempb -= s->composition[i];
+			}
+			else {
+				std::cout << ", element: " << s->elements[i] << std::endl;
+				i = s->composition.size();
+			}
+		}
+		*/
+	}
+	//step 3: number of bonds requirement
+	bool bondRequirement = true;
+	for (int a = 0; a < natoms; a++)
+	{
+		//std::cout << "proof of check 2" << std::endl;
+		int bondNo = 0;
+		for (int b = 0; b < natoms; b++)
+		{
+			if (graph[a][b]) bondNo++;
+		}
+		if (bondNo < numBonds) bondRequirement = false;
+	}
+	//step 4: cleanup
+	for (int i = 0; i < natoms; i++) delete[] graph[i];
+	delete[] graph;
+	delete[] visited;
+	//step 5: return
+	//std::cout << connected << bondRequirement << std::endl;
+	return (connected && bondRequirement);
+}
+
+std::vector<bool> randomNchooseC(int n, int c)
+{
+	//std::cout << "parameters given: " << n << " " << c << std::endl;
+	std::vector<bool>  retVal = {};
+	int rn = n;
+	int rc = c;
+	for (int i = 0; i < n; i++)
+	{
+		retVal.push_back(false);
+		//std::cout << i << std::endl;
+		int rval = rand() % rn;
+		if (rval < rc) {
+			rc--;
+			retVal[i] = true;
+		}
+		rn--;
+		
+	}
+	return retVal;
+}
+template<class T>
+std::vector<std::vector<T>> combineSets(std::vector<std::vector<T>> setA, std::vector<std::vector<T>> setB)
+{
+	std::vector<std::vector<T>> retVal = {};
+	for (int i = 0; i < setA.size(); i++)
+	{
+		//std::cout << "CS--" << i << std::endl;
+		std::vector<T> element = {};
+		for (int j = 0; j < setA[i].size(); j++) element.push_back(setA[i][j]);
+		//std::cout << "CS-2-" << i << std::endl;
+		for (int j = 0; j < setB[i].size(); j++) element.push_back(setB[i][j]);
+		retVal.push_back(element);
+	}
+	return retVal;
+}
+void moveSet(std::vector<std::vector<atom>>& set, double x, double y, double z)
+{
+	for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++) for (std::vector<atom>::iterator itt = it->begin(); itt != it->end(); itt++)
+	{
+		itt->x += x;
+		itt->y += y;
+		itt->z += z;
+	}
+}
+
+std::vector<structure*> proceduralSeeds(std::vector<int> composition, std::vector<std::string> elements, int numRings, std::vector<int> nValues, double covalentCriteriaPercent,std::vector<int> allowedHoles,int keepPerCombo, int keepPerRingCombination, double achange)
+{
+	//std::cout << "elements : ";
+	//for (int eee = 0; eee < elements.size(); eee++) std::cout << elements[eee] << " ";
+	//std::cout << std::endl;
+	/*
+	It is reasonable to expected to use this function for multiple ring values, but not acceptable to use it for the same ring value with different nValues as this will lead to duplicate seeds.
+	nvalues cannot contain duplicates
+	*/
+
+	
+	bool dOut = true;//debug output
+	int debugging = 0;
+	//int debu = true;
+	int natoms = 0;
+	for (int i = 0; i < composition.size(); i++) natoms += composition[i];
+	//if (maxHoles == INT_MAX) maxHoles = INT_MAX - natoms;//avoid integer overflow
+	/*
+	Determine n values for the rings, this will also determine the number of holes.
+	*/
+	std::vector < std::vector<int>> ringCombinations = {};//the inner vector is length numRings, and the integer is the iterator of nValues for the nvalue of each ring. the total vector contains the number of possible combinations
+	int nrc = pow(nValues.size(),numRings);//number of combinations of ring number distributions for each element
+	//this variable will be useful later but only needs to be found once
+	double totalCovalentRadiiHorizontal = 0;
+	double totalCovalentRadiiVertical = 0;
+	for (int i = 0; i < elements.size(); i++) totalCovalentRadiiHorizontal += double(covalentRadii(elements[i], 1,true))/100.0 * composition[i];//divide by 100 for pm to A
+	double averageCovalentRadiiHorizontal = totalCovalentRadiiHorizontal / (double)natoms;
+	//std::cout << averageCovalentRadiiHorizontal << " acr,n " << natoms <<" "<<  totalCovalentRadiiHorizontal << elements[0] << covalentRadii(elements[0], 1,true) << std::endl;
+	for (int i = 0; i < elements.size(); i++) totalCovalentRadiiVertical += double(covalentRadii(elements[i], 1,false)) / 100.0 * composition[i];//divide by 100 for pm to A
+	double averageCovalentRadiiVertical = totalCovalentRadiiVertical / (double)natoms;
+	//std::cout << averageCovalentRadiiVertical << " acr,n " << natoms << " " << totalCovalentRadiiVertical << elements[0] << covalentRadii(elements[0], 1,false) << std::endl;
+	std::vector<int> ringCombination = {};
+	for (int rc = 0; rc < numRings; rc++) ringCombination.push_back(0);
+	std::cout << "num rings: " << numRings << " ring combo size: " << ringCombination.size();
+	for (int rc = 0; rc < nrc; rc++) {
+		int ring = 0;
+		if(rc != 0)ringCombination[ring]++;
+		while (ringCombination[ring] >= nValues.size())
+		{
+			ringCombination[ring] = 0;
+			ringCombination[++ring]++;
+			if (debugging > 1) std::cout << "d ringCombination[" << ring << "]: " << ringCombination[ring] << std::endl;
+		}
+		//Check if this ring combination is valid
+		int maxAtoms = 0;
+		for (std::vector<int>::iterator it = ringCombination.begin(); it != ringCombination.end(); it++ ) maxAtoms += nValues[(*it)];//the maximum number of atoms that can be fit in this combination is the sum of the nvalues of the ring.
+		if (allowedHoles.size() == 0) ringCombinations.push_back(ringCombination);
+		else {
+			bool RCallowed = false;
+			for (std::vector<int>::iterator it = allowedHoles.begin(); it != allowedHoles.end(); it++) if (maxAtoms >= natoms && maxAtoms - *it == natoms) {
+				RCallowed = true;
+				std::cout <<"P: " << maxAtoms << ":maxAtoms,natoms:" << natoms << ",numHoles:" << *it << std::endl;
+			}
+			else {
+				std::cout << "DNP: " << maxAtoms << ":maxAtoms,natoms:" << natoms << ",numHoles:" << *it << std::endl;
+			}
+			if(RCallowed) ringCombinations.push_back(ringCombination);
+		}
+		//if (maxAtoms >= natoms && maxAtoms - maxHoles <= natoms) //utilizes the copy constructor to get this instanc of ring combination, without the further changes
+		//if (maxAtoms - maxHoles <= natoms)std::cout << "MA: " << maxAtoms << ", mH: " << maxHoles << ", natoms: " << natoms << std::endl;
+		//else std::cout << "passed" << std::endl;
+	}
+	/*
+	Replace the indeces in ring combinations with the number of atoms in the rings
+	*/
+	for (int rco = 0; rco < ringCombinations.size(); rco++) for (int rcoi = 0; rcoi < ringCombinations[rco].size(); rcoi++) ringCombinations[rco][rcoi] = nValues[ringCombinations[rco][rcoi]];
+	if (debugging || true)
+	{
+		std::cout << "ring combinations:" << ringCombinations.size() << std::endl;
+		for (std::vector<std::vector<int>>::iterator ccit = ringCombinations.begin(); ccit != ringCombinations.end(); ccit++)
+		{
+			for (std::vector<int>::iterator cccit = ccit->begin(); cccit != ccit->end(); cccit++) std::cout << *cccit << " ";
+			std::cout << std::endl;
+		}
+		std::cout << std::endl;
+	}
+	/*
+	remove ring combinations that are exact reverses
+	*/
+	std::vector < std::vector<int>> filteredRingCombinations = {};
+	bool* keep = new bool[ringCombinations.size()];
+	for (int rC1 = 0; rC1 < ringCombinations.size(); rC1++)
+	{
+		keep[rC1] = true;
+		for (int rC2 = rC1; rC2 < ringCombinations.size(); rC2++)
+		{
+			if (rC1 != rC2)
+			{
+				bool identical = true;
+				for (int r = 0; r < numRings; r++)
+				{
+					if (ringCombinations[rC1][r] != ringCombinations[rC1][numRings - (r + 1)]) identical = false;
+				}
+				if (identical) keep[rC1] = false;
+			}
+		}
+	}
+	for (int rC1 = 0; rC1 < ringCombinations.size(); rC1++) if (keep[rC1]) filteredRingCombinations.push_back(ringCombinations[rC1]);
+	
+	ringCombinations = filteredRingCombinations;
+	//filter done
+
+	/*
+				For each ring with smaller rings as the next ring we need combinations for combining these rings.
+				For example for the rings of size 3,2,1,4 we want a sitation with 3+2, 1, 4 and 3+2+1, 4, and 3, 2+1, 4
+				we do not want to combine rings if smaller rings proceed because 1,2,3,4 is considered a different combination, and 3+2+1 will be duplicate.
+				Additionally in 3, 1, 2, 4, 3, 2+1, 4 would be duplicate
+				and 1+2+3+4 would be duplucate from 4,3,2,1 and 3,2,1,4
+	*/
+	std::vector < std::vector< std::vector<int>>> combinedRingCombinations = {};
+	if (debugging)
+	{
+		std::cout << "fitlered ring combinations:" << filteredRingCombinations.size() << std::endl;
+		for (std::vector<std::vector<int>>::iterator ccit = filteredRingCombinations.begin(); ccit != filteredRingCombinations.end(); ccit++)
+		{
+			for (std::vector<int>::iterator cccit = ccit->begin(); cccit != ccit->end(); cccit++) std::cout << *cccit << " ";
+			std::cout << std::endl;
+		}
+		std::cout << std::endl;
+	}
+	for (std::vector<std::vector<int>>::iterator ringCombination = ringCombinations.begin(); ringCombination != ringCombinations.end(); ringCombination++)
+	{
+		std::vector<std::vector<std::vector<int>>> currentRingCombination = {};//for each ring, this contains the possibility of smaller rings
+		for (int ring = 0; ring < ringCombination->size(); ring++)
+		{
+			std::vector<std::vector<int>> currentRingCombinations = {};//each of these represents one ring, the vector inside represents combinations of this ring with smaller rings
+			std::vector<int> thisRing = { (*ringCombination)[ring] };
+			currentRingCombinations.push_back(thisRing);
+			for (int nextRing = ring+1; nextRing < ringCombination->size(); nextRing++)
+			{
+				if ((*ringCombination)[nextRing-1] > (*ringCombination)[nextRing])
+				{
+					//create a combination with this smaller ring inside and the rings inbetween
+					thisRing.push_back((*ringCombination)[nextRing]);
+					currentRingCombinations.push_back(thisRing);
+				}
+				else {
+					nextRing = ringCombination->size();
+				}
+
+			}
+			currentRingCombination.push_back(currentRingCombinations);
+		}
+		//somethign to completely enumerate all fused ring combos that are compatible. ie 4+3 , 2+1 and not 4+3+2, 2+1
+
+		/*
+		Now we have a vector (for each ring) containing a vector of all their possible sub rings represented as a vector
+		Now we must turn these into possible ring combinations which is just a vector of a ring which is a vector
+		*/
+		std::vector<std::vector<std::vector<int>>> validRingCombinations = { };
+		if (debugging > 1)
+		{
+			std::cout << "currentRingCombination: " << currentRingCombination.size() << std::endl;
+			for (std::vector < std::vector< std::vector<int>>>::iterator cit = currentRingCombination.begin(); cit != currentRingCombination.end(); cit++)
+			{
+				for (std::vector<std::vector<int>>::iterator ccit = cit->begin(); ccit != cit->end(); ccit++)
+				{
+					std::cout << "{";
+					for (std::vector<int>::iterator cccit = ccit->begin(); cccit != ccit->end(); cccit++) std::cout << *cccit << " ";
+					std::cout << "} ";
+				}
+				std::cout << std::endl;
+			}
+		}
+
+		for (int ring = 0; ring < currentRingCombination.size(); ring++)
+		{
+			std::vector<std::vector<std::vector<int>>> currentLevelValidRingCombinations = { };
+			if (ring == 0)
+			{
+				for (int ringCombo = 0; ringCombo < currentRingCombination[ring].size(); ringCombo++) currentLevelValidRingCombinations.push_back({ currentRingCombination[ring][ringCombo] });
+				if (debugging) {
+					std::cout << "current level valid ring combinations size: " << currentLevelValidRingCombinations.size() << std::endl;
+					for (std::vector < std::vector< std::vector<int>>>::iterator cit = currentLevelValidRingCombinations.begin(); cit != currentLevelValidRingCombinations.end(); cit++)
+					{
+						for (std::vector<std::vector<int>>::iterator ccit = cit->begin(); ccit != cit->end(); ccit++)
+						{
+							std::cout << "{";
+							for (std::vector<int>::iterator cccit = ccit->begin(); cccit != ccit->end(); cccit++) std::cout << *cccit << " ";
+							std::cout << "} ";
+						}
+						std::cout << std::endl;
+					}
+				}
+				validRingCombinations = currentLevelValidRingCombinations;
+				if (debugging) std::cout << "moving on from ring 0, valid ring combinations size: " << validRingCombinations.size() << std::endl;
+			}
+			else {
+				if (debugging) std::cout << "not ring 0, valid ring combinations before adding next ring: " << validRingCombinations.size() << std::endl;
+				//for each previous valid ring combination
+				for (int pvrc = 0; pvrc < validRingCombinations.size(); pvrc++)
+				{
+
+					//get the current number of rings inside
+					int includedRings = 0;
+					for (int pvrci = 0; pvrci < validRingCombinations[pvrc].size(); pvrci++) includedRings += validRingCombinations[pvrc][pvrci].size();
+					if (debugging) std::cout << "included rings[index]:" << includedRings << std::endl;
+					if (includedRings-1 < ring)
+					{
+						
+						for (int ringCombo = 0; ringCombo < currentRingCombination[ring].size(); ringCombo++)
+						{
+							std::vector<std::vector<int>> currentLevelValidRingCombination = validRingCombinations[pvrc];
+							currentLevelValidRingCombination.push_back(currentRingCombination[ring][ringCombo]);
+							currentLevelValidRingCombinations.push_back(currentLevelValidRingCombination);
+						}
+					}
+					else {
+						//this ring is already included, dont add a new ring
+						std::vector<std::vector<int>> currentLevelValidRingCombination = validRingCombinations[pvrc];
+						currentLevelValidRingCombinations.push_back(currentLevelValidRingCombination);
+					}
+				}
+				if (debugging) {
+					std::cout << "current level valid ring combinations size: " << currentLevelValidRingCombinations.size() << std::endl;
+					for (std::vector < std::vector< std::vector<int>>>::iterator cit = currentLevelValidRingCombinations.begin(); cit != currentLevelValidRingCombinations.end(); cit++)
+					{
+						for (std::vector<std::vector<int>>::iterator ccit = cit->begin(); ccit != cit->end(); ccit++)
+						{
+							std::cout << "{";
+							for (std::vector<int>::iterator cccit = ccit->begin(); cccit != ccit->end(); cccit++) std::cout << *cccit << " ";
+							std::cout << "} ";
+						}
+						std::cout << std::endl;
+					}
+				}
+			}
+			validRingCombinations = currentLevelValidRingCombinations;
+		}
+		for (std::vector<std::vector<std::vector<int>>>::iterator vit = validRingCombinations.begin(); vit != validRingCombinations.end(); vit++) combinedRingCombinations.push_back((*vit));
+	}
+
+
+	if (dOut) std::cout << "# of ring combinations: " << combinedRingCombinations.size() << std::endl;
+	if (dOut)
+	{
+		for (std::vector < std::vector< std::vector<int>>>::iterator cit = combinedRingCombinations.begin(); cit != combinedRingCombinations.end(); cit++)
+		{
+			for (std::vector<std::vector<int>>::iterator ccit = cit->begin(); ccit != cit->end(); ccit++)
+			{
+				std::cout << "{";
+				for (std::vector<int>::iterator cccit = ccit->begin(); cccit != ccit->end(); cccit++) std::cout << *cccit << " ";
+				std::cout << "} ";
+			}
+			std::cout << std::endl;
+		}
+	}
+	
+	std::vector<std::vector<std::pair<std::vector<std::vector<atom>>,std::vector<std::vector<int>>>>> allSets;
+	
+	/*
+	Tabulate total number of combinations
+	*/
+	int totalCombos = 0;
+	for (std::vector<std::vector<std::vector<int>>>::iterator ringCombination = combinedRingCombinations.begin(); ringCombination != combinedRingCombinations.end(); ringCombination++)
+	{
+		int ringSpots = 0;
+		for (std::vector<std::vector<int>>::iterator it = ringCombination->begin(); it != ringCombination->end(); it++) for (std::vector<int>::iterator rit = it->begin(); rit != it->end(); rit++) ringSpots += (*rit);//the maximum number of atoms that can be fit in this combination is the sum of the nvalues of the ring.
+		int nHoles = ringSpots - natoms;
+		int nOnes = 0;
+		std::vector<bool*> holeLocations = enumeration(ringSpots - nOnes, natoms - nOnes, true);//the boolean at the end indicates if one location will always be held constant. this should be done to reduce hole locations that are identical
+		std::vector<int*> elementDistributions = multinomialCoefficient(natoms, composition);
+		for (std::vector<bool*>::iterator holeLocation = holeLocations.begin(); holeLocation != holeLocations.end(); holeLocation++)
+		{
+			for (std::vector<int*>::iterator elementDistribution = elementDistributions.begin(); elementDistribution != elementDistributions.end(); elementDistribution++)
+			{
+				totalCombos++;
+			}
+		}
+	}
+	std::cout << "Total combos: " << totalCombos << " reducing to at most " << keepPerCombo << std::endl;
+	std::vector<bool> keepVector;
+	if(keepPerCombo > 0) keepVector = randomNchooseC(totalCombos, keepPerCombo);
+	else keepVector = randomNchooseC(totalCombos, totalCombos);
+	int comboIterator = 0;
+
+	for (std::vector<std::vector<std::vector<int>>>::iterator ringCombination = combinedRingCombinations.begin(); ringCombination != combinedRingCombinations.end(); ringCombination++)
+	{
+		std::vector<std::pair<std::vector<std::vector<atom>>,std::vector<std::vector<int>>>> notAllSets;
+		/*if (debu) {
+			std::cout << "D0 ring combination";
+			for (std::vector<std::vector<int>>::iterator ccit = ringCombination->begin(); ccit != ringCombination->end(); ccit++)
+			{
+				std::cout << "{";
+				for (std::vector<int>::iterator cccit = ccit->begin(); cccit != ccit->end(); cccit++) std::cout << *cccit << " ";
+				std::cout << "} ";
+			}
+			std::cout << std::endl;
+
+		}*/
+		/*//for each ring combination now we need to iterate combinations of possible holes.
+		we must be careful to not create duplicate structures, or produce as few as possible. 
+		Therefore because in later steps it will be possible to place rings inside of eachother, if the ring size is 1 a hole will not be allocated.
+
+		*/
+		int ringSpots = 0;
+		for (std::vector<std::vector<int>>::iterator it = ringCombination->begin(); it != ringCombination->end(); it++) for(std::vector<int>::iterator rit = it->begin(); rit!= it->end(); rit++) ringSpots += (*rit);//the maximum number of atoms that can be fit in this combination is the sum of the nvalues of the ring.
+		int nHoles = ringSpots - natoms;
+		//if(true)std::cout << "nHoles: " << nHoles << std::endl;
+		int nOnes = 0;//the number of rings with n = 1 , these cannot be holes!
+		/*
+		{1} cannot be a hole, but can {x,1} have a hole at 1? It is a goode idea to allow for {x,1} to have a hole at the one spot, allowing for wider rings which are unrealistic on their own but realistic if there are rings above and below
+		I changed my mind, no ones will have holes
+		*/
+		for (std::vector<std::vector<int>>::iterator it = ringCombination->begin(); it != ringCombination->end(); it++) for(std::vector<int>::iterator oit = it->begin(); oit != it->end(); oit++) if(*oit == 1) nOnes++;
+
+		std::vector<bool*> holeLocations = enumeration(ringSpots - nOnes, natoms - nOnes, true);//the boolean at the end indicates if one location will always be held constant. this should be done to reduce hole locations that are identical
+		//now that we have the hole locations we also want the distribution of elements in each spot
+		std::vector<int*> elementDistributions = multinomialCoefficient(natoms, composition);
+		
+		//combinations of hole locations and element distributions
+		if (dOut) std::cout << "\t# of hole location and element distribution combinations: " << holeLocations.size()*elementDistributions.size() << std::endl;
+
+		
+		
+
+		for (std::vector<bool*>::iterator holeLocation = holeLocations.begin(); holeLocation != holeLocations.end(); holeLocation++)
+		{
+			for (std::vector<int*>::iterator elementDistribution = elementDistributions.begin(); elementDistribution != elementDistributions.end(); elementDistribution++)
+			{
+				if (keepVector[comboIterator])
+				{
+
+
+					bool atomPrintout = false;
+					if (false)
+					{
+						//print details to see if the mistake has already been made
+						std::cout << "printout\n---------------------\nhole locations: ";
+						for (int i = 0; i < ringSpots - nOnes; i++) std::cout << (*holeLocation)[i] << " ";
+						std::cout << "std::endl";
+						std::cout << "EDS: " << elementDistributions.size() << std::endl;
+						std::cout << "element distribution:";
+						for (int i = 0; i < natoms; i++) std::cout << (*elementDistribution)[i] << " ";
+						std::cout << "std::endl";
+						std::cout << "ring combinaiton: ";
+						for (std::vector<std::vector<int>>::iterator ccit = ringCombination->begin(); ccit != ringCombination->end(); ccit++)
+						{
+							std::cout << "{";
+							for (std::vector<int>::iterator cccit = ccit->begin(); cccit != ccit->end(); cccit++) std::cout << *cccit << " ";
+							std::cout << "} ";
+						}
+						std::cout << std::endl;
+						std::cout << "--------------------\n";
+					}
+
+					//if (debu) std::cout << "D1: inner loop" << std::endl;
+					//std::cout << "creating new set" << std::endl;
+					std::vector<std::vector<atom>> set;
+					std::vector<std::vector<int>> assignment;
+					int assign = 0;
+
+					for (int e = 0; e < elements.size(); e++) {
+						set.push_back({});
+						assignment.push_back({});
+					}
+					if (set.size() == 0) std::cout << "WARNING SET SIZE 0 AFTER CREATION" << std::endl;
+
+
+
+					if (achange > 0)
+					{
+
+						/*
+					Finally we can create the structure!
+					*/
+					/*
+					For each ring we must determine a center radii (for each atom type) that allows atoms in the ring to be spaced out well.
+					If there are center atoms, then we will choose whichever radii is larger, the one from the distance from the center atom or between atoms.
+					As a ring may have many types of atoms, each will be farther from the center and this will be determined for each element type individually as if they were the only one in the ring.
+					*/
+					//std::cout << "RM-- 1" << std::endl;
+						std::vector<std::vector<atom>> growingSet;
+						std::vector<std::vector<int>> growingAssignment;
+						int gassign = 0;
+						for (int e = 0; e < elements.size(); e++) {
+							growingSet.push_back({});
+							growingAssignment.push_back({});
+						}
+						//std::cout << "RM-- 2" << std::endl;
+						int atomsPrior = 0;//counts the atoms we already visited, for access from element distribution
+						int atomsPriorHoles = 0;//counts atoms we alreadt visited - ones, to access hole distribution
+						int atomIterator = 0;
+						int atomIteratorHoles = 0;
+						double lastZ = -achange;//whats the best starting value?
+
+						bool validCombination = true;
+
+						//std::cout << "RM-- 3" << std::endl;
+						for (int ring = 0; ring < ringCombination->size() && validCombination; ring++)
+						{
+
+							//std::cout << "RM-- 4:"<< ring << std::endl;
+							std::vector<std::vector<atom>> ringOfAtoms;
+							std::vector<std::vector<int>> ringAssignment;
+							int rassign = 0;
+							for (int e = 0; e < elements.size(); e++) {
+								ringOfAtoms.push_back({});
+								ringAssignment.push_back({});
+							}
+							double lastRingAvgRadii = 0;
+							//std::cout << "RM-- 5" << std::endl;
+							double lastRadius = 0;
+							for (int subring = (*ringCombination)[ring].size() - 1; subring >= 0 && validCombination; subring--)
+							{
+								//std::cout << "RM-- 6:" << subring << std::endl;
+								double radius = lastRadius;
+								bool subRingApproved = false;
+								int tatomsPrior = atomsPrior;//counts the atoms we already visited, for access from element distribution
+								int tatomsPriorHoles = atomsPriorHoles;//counts atoms we alreadt visited - ones, to access hole distribution
+								int tatomIterator = atomIterator;
+								int tatomIteratorHoles = atomIteratorHoles;
+
+								int radiusSteps = 0;
+								int maxRadiusSteps = (*ringCombination)[ring][subring] * (double)5 / achange;//not sure about this for large rings
+
+								
+
+								double minRadius = 0;
+								double maxRadius = 0;
+								bool minFound = false;
+								bool maxFound = false;
+
+								
+
+								while ((!minFound || !maxFound) && validCombination) {
+									int snatoms = 0;
+									tatomsPrior = atomsPrior;//counts the atoms we already visited, for access from element distribution
+									tatomsPriorHoles = atomsPriorHoles;//counts atoms we alreadt visited - ones, to access hole distribution
+									tatomIterator = atomIterator;
+									tatomIteratorHoles = atomIteratorHoles;
+									//std::cout << "stuck R? ?" << radius << std::endl;
+
+									//std::cout << "RM-- 7 looping for subring approval" << std::endl;
+									std::vector<std::vector<atom>> subringOfAtoms;
+									std::vector<std::vector<int>> subRingAssignment;
+									int sassign = assign;//this used to be 0, but that reset the assignment every ring. we need sassign as we may destroy this structure many times and dont want assignment to increase forever.
+									
+									for (int e = 0; e < elements.size(); e++) {
+										subringOfAtoms.push_back({});
+										subRingAssignment.push_back({});
+									}
+									//std::cout << "RM-- 8" << std::endl;
+									for (int a = 0; a < (*ringCombination)[ring][subring]; a++)
+									{
+										//std::cout << "RM-- 9:" << a << std::endl;
+										bool thisHole = true;
+										if ((*ringCombination)[ring][subring] != 1) {
+											if (atomPrintout) std::cout << "H" << tatomIteratorHoles << ',' << (*holeLocation)[tatomIteratorHoles] << ':';
+											thisHole = (*holeLocation)[tatomIteratorHoles];//somehow 1 is for no hole now
+											tatomIteratorHoles++;
+										}
+
+										if (thisHole)
+										{
+											snatoms++;
+											int thisElement = (*elementDistribution)[tatomIterator];
+
+											tatomIterator++;
+
+											double angle = a * 2 * M_PI / (*ringCombination)[ring][subring];
+
+											double x = radius * cos(angle);
+											double y = radius * sin(angle);
+											if (atomPrintout) std::cout << elements[thisElement] << " ";
+
+											if ((*ringCombination)[ring][subring] == 1)
+											{
+												x = 0;
+												y = 0;
+											}
+
+											if (elements[thisElement].size() > 2)
+											{
+
+												std::vector<structure* > ssss = structuresFromXYZ(elements[thisElement]);
+												moveSet(ssss[0]->set, x, y, 0);
+												for (int es = 0; es < ssss[0]->set.size(); es++)
+												{
+													std::string celement = ssss[0]->elements[es];
+													int thisElementE = 0;
+													for (int ee = 0; ee < elements.size(); ee++) if (celement == elements[ee]) {
+														thisElementE = ee;
+													}
+													for (int as = 0; as < ssss[0]->set[es].size(); as++)
+													{
+														ssss[0]->set[es][as].fixedGroup = thisElement;
+														subringOfAtoms[thisElementE].push_back(ssss[0]->set[es][as]);
+														subRingAssignment[thisElementE].push_back(sassign);//used to be sassign, but its not clear why. this each ring to start with assignment 0
+													}
+												}
+												delete ssss[0];
+												sassign++;
+												
+											}
+											else {
+												//std::cout << "pushing element to set in " << elements[thisElement] << std::endl;
+												subringOfAtoms[thisElement].push_back(atom(x, y, 0));
+												subRingAssignment[thisElement].push_back(sassign++/*sassign++*/);//used to be sassign, but its not clear why. this each ring to start with assignment 0
+											}
+											//if (debu) std::cout << "D10" << std::endl;
+											//needs to be added to a set by element type
+
+										}
+										else {
+
+										}
+										//std::cout << "RM-- 10" << std::endl;
+										//if (debu) std::cout << "D4: atoms survived" << std::endl;
+									}
+									//std::cout << "RM-- 11" << std::endl;
+									ringOfAtoms[0];
+									//std::cout << subringOfAtoms[0].size();
+									subringOfAtoms[0];
+									//std::cout << "RM-- 11.05" << std::endl;
+									std::vector<std::vector<atom>> combinedSubRing = combineSets(ringOfAtoms, subringOfAtoms);
+									//std::cout << "RM-- 11.1" << std::endl;
+									std::vector<std::vector<int>> combinedAssignment = combineSets(ringAssignment, subRingAssignment);
+									//std::cout << "RM-- 11.2" << std::endl;
+									structure checkS(combinedSubRing, elements, combinedAssignment);
+									//std::cout << "RM-- 11.3" << std::endl;
+									//std::cout << "min found: " << minFound << std::endl;
+									//std::cout << "max found: " << maxFound << std::endl;
+									//checkS.print();
+									if (!minFound) {
+										//std::cout << "Min search" << std::endl;
+										minFound = covalentCriteria(&checkS, covalentCriteriaPercent);
+										minRadius = radius;
+									}
+									else {
+										//std::cout << "max search" << radius << std::endl;
+										//std::cout << bondingRequirement(&checkS, covalentCriteriaPercent,1);
+										//maxFound = !(covalentCriteria(&checkS, covalentCriteriaPercent) && bondingRequirement(&checkS,covalentCriteriaPercent,1));
+										maxFound = !connectednessRequirement(&checkS, covalentCriteriaPercent, 1);
+										//maxFound = !bondingRequirement(&checkS, covalentCriteriaPercent, 1);
+										if (!maxFound) maxRadius = radius;
+									}
+									//std::cout << "miF:" << minFound << "maF:" << maxFound << std::endl;
+									radius += achange;
+									/*
+									subRingApproved = covalentCriteria(&checkS, covalentCriteriaPercent);//connectednessRequirement(&checkS, covalentCriteriaPercent, 1) && 
+									//std::cout << "RM-- 11.4" << std::endl;
+
+									if (subRingApproved)
+									{
+										//std::cout << "sub ring approved, radius: " << radius << std::endl;
+										ringAssignment = combinedAssignment;
+										ringOfAtoms = combinedSubRing;
+									}
+									else {
+										//std::cout << "sub ring not approved, radius: " << radius << std::endl;
+										radius += achange;
+									}
+									//std::cout << "RM-- 12" << std::endl;
+									lastRadius = radius;
+									*/
+									if (radiusSteps > maxRadiusSteps) {
+										validCombination = false;
+										std::cout << "failed due to radius" << std::endl;
+									}
+									if (snatoms == 1)
+									{
+										std::cout << "snatoms = 1" << std::endl;
+										minFound = true;
+										maxFound = true;
+										
+									}
+								}
+								if (validCombination)
+								{
+									//std::cout << "max rad:" << maxRadius << " minRadius " << minRadius;
+									double chosenRadius = minRadius / 2 + maxRadius / 2;
+									//std::cout << "Chosen radius: " << chosenRadius << std::endl;
+									radius = chosenRadius;
+									//std::cout << "using radius: " << radius << std::endl;
+									tatomsPrior = atomsPrior;//counts the atoms we already visited, for access from element distribution
+									tatomsPriorHoles = atomsPriorHoles;//counts atoms we alreadt visited - ones, to access hole distribution
+									tatomIterator = atomIterator;
+									tatomIteratorHoles = atomIteratorHoles;
+
+
+									//std::cout << "RM-- 7 looping for subring approval" << std::endl;
+									std::vector<std::vector<atom>> subringOfAtoms;
+									std::vector<std::vector<int>> subRingAssignment;
+									int sassign = assign;//this assignment actually gets used. the one in the loop appears to get erased. we must start off 
+									//regardless this is not in a while loop and will only occur once per ring so we can use assign
+									for (int e = 0; e < elements.size(); e++) {
+										subringOfAtoms.push_back({});
+										subRingAssignment.push_back({});
+									}
+									//std::cout << "RM-- 8" << std::endl;
+									for (int a = 0; a < (*ringCombination)[ring][subring]; a++)
+									{
+										//std::cout << "RM-- 9:" << a << std::endl;
+										bool thisHole = true;
+										if ((*ringCombination)[ring][subring] != 1) {
+											if (atomPrintout) std::cout << "H" << tatomIteratorHoles << ',' << (*holeLocation)[tatomIteratorHoles] << ':';
+											thisHole = (*holeLocation)[tatomIteratorHoles];//somehow 1 is for no hole now
+											tatomIteratorHoles++;
+										}
+
+										if (thisHole)
+										{
+											int thisElement = (*elementDistribution)[tatomIterator];
+
+											tatomIterator++;
+
+											double angle = a * 2 * M_PI / (*ringCombination)[ring][subring];
+
+											double x = radius * cos(angle);
+											double y = radius * sin(angle);
+											if (atomPrintout) std::cout << elements[thisElement] << " ";
+
+											if ((*ringCombination)[ring][subring] == 1)
+											{
+												x = 0;
+												y = 0;
+											}
+
+											if (elements[thisElement].size() > 2)
+											{
+												//this code block and ones like it are for when our element is a group of atoms and not a single atom. this can be extremely confusing to understand without that knowledge.
+												std::vector<structure* > ssss = structuresFromXYZ(elements[thisElement]);
+												moveSet(ssss[0]->set, x, y, 0);
+												for (int es = 0; es < ssss[0]->set.size(); es++)
+												{
+													std::string celement = ssss[0]->elements[es];
+													int thisElementE = 0;
+													for (int ee = 0; ee < elements.size(); ee++) if (celement == elements[ee]) {
+														thisElementE = ee;
+													}
+													for (int as = 0; as < ssss[0]->set[es].size(); as++)
+													{
+														ssss[0]->set[es][as].fixedGroup = thisElement;
+														subringOfAtoms[thisElementE].push_back(ssss[0]->set[es][as]);
+														subRingAssignment[thisElementE].push_back(assign);//this used to be sassign,  but it reset everything to 0. this is not while looped so its not clear why we cant use assign
+													}
+												}
+												delete ssss[0];
+												assign++; 
+											}
+											else {
+												//std::cout << "pushing element to set in " << elements[thisElement] << std::endl;
+												subringOfAtoms[thisElement].push_back(atom(x, y, 0));
+												subRingAssignment[thisElement].push_back(assign++);
+											}
+											//if (debu) std::cout << "D10" << std::endl;
+											//needs to be added to a set by element type
+
+										}
+										else {
+
+										}
+										//std::cout << "RM-- 10" << std::endl;
+										//if (debu) std::cout << "D4: atoms survived" << std::endl;
+									}
+									//std::cout << "RM-- 11" << std::endl;
+									ringOfAtoms[0];
+									//std::cout << subringOfAtoms[0].size();
+									subringOfAtoms[0];
+									//std::cout << "RM-- 11.05" << std::endl;
+									std::vector<std::vector<atom>> combinedSubRing = combineSets(ringOfAtoms, subringOfAtoms);
+									//std::cout << "RM-- 11.1" << std::endl;
+									std::vector<std::vector<int>> combinedAssignment = combineSets(ringAssignment, subRingAssignment);
+									//std::cout << "RM-- 11.2" << std::endl;
+									structure checkS(combinedSubRing, elements, combinedAssignment);
+
+									ringAssignment = combinedAssignment;
+									ringOfAtoms = combinedSubRing;
+									lastRadius = radius;
+								}
+
+								atomsPrior = tatomsPrior;//counts the atoms we already visited, for access from element distribution
+								atomsPriorHoles = tatomsPriorHoles;//counts atoms we alreadt visited - ones, to access hole distribution
+								atomIterator = tatomIterator;
+								atomIteratorHoles = tatomIteratorHoles;
+
+
+
+
+								//if (atomPrintout) std::cout << ") ";
+								//if (debu) std::cout << "D3: subring SURVIVED" << std::endl;
+								//std::cout << std::endl << "LRAR now: " << lastRingAvgRadii << std::endl;
+								/*if (lastRingAvgRadii > 1000)
+								{
+									std::cout << "lastRingAvgRadii fail: " << lastRingAvgRadii << ", totalradii: " << totalRadii << ", ratoms: " << ratoms << std::endl;
+								}*/
+
+								//std::cout << "LRAR after: " << lastRingAvgRadii << ", totalRadii: " << totalRadii << " ratoms: " << ratoms << std::endl;
+
+							}
+							bool ringApproved = false;
+							double z = lastZ + achange;
+
+							double minZ = 0;
+							double maxZ = 0;
+							bool minZfound = false;
+							bool maxZfound = false;
+							//std::cout << "RM-- 13" << std::endl;
+							moveSet(ringOfAtoms, 0, 0, z);//move to the last z to start
+							int zsteps = 0;
+							int zstepMAX = double(5) / achange;
+							while (!minZfound && !maxZfound && validCombination)
+							{
+								//std::cout << "stuck ? Z" << std::endl;
+								//std::cout << "RM-- 14: ring approval" << std::endl;
+								moveSet(ringOfAtoms, 0, 0, achange);
+								z += achange;
+								std::vector<std::vector<atom>> combinedRing = combineSets(growingSet, ringOfAtoms);
+								std::vector<std::vector<int>> combinedAssignment = combineSets(growingAssignment, ringAssignment);
+								structure checkS(combinedRing, elements, combinedAssignment);
+								if (!minZfound) {
+									minZfound = covalentCriteria(&checkS, covalentCriteriaPercent);//&& connectednessRequirement(&checkS, covalentCriteriaPercent, 1) &&
+									minZ = z;
+									//std::cout << "minzfoudn" << std::endl;
+								}
+								else {
+									maxZfound = !connectednessRequirement(&checkS, covalentCriteriaPercent, 1);
+									
+									//maxZfound = covalentCriteria(&checkS, covalentCriteriaPercent);//&& connectednessRequirement(&checkS, covalentCriteriaPercent, 1) &&
+									if(!maxZfound) maxZ = z;
+									//std::cout << "maxzfoudn" << std::endl;
+
+								}
+								/*
+								if (ringApproved)
+								{
+									//std::cout << "ring approved" << std::endl;
+									growingAssignment = combinedAssignment;
+									growingSet = combinedRing;
+									lastZ = z;
+									//std::cout << "ring approved Z: " << z << std::endl;
+								}//else std::cout << "ring not approved, Z:" << z << std::endl;
+								//if (debu) std::cout << "D2: ring SURVIVED" << std::endl;
+								*/
+								zsteps++;
+								if (zsteps > zstepMAX) {
+									validCombination = false;
+									//std::cout << "failed due to z" << std::endl;
+								}
+							}
+							if (validCombination)
+							{
+								z = minZ / 2 + maxZ / 2;
+								moveSet(ringOfAtoms, 0, 0, z - maxZ -achange);//currently at maxZ + achange, move back to z this way
+								std::vector<std::vector<atom>> combinedRing = combineSets(growingSet, ringOfAtoms);
+								std::vector<std::vector<int>> combinedAssignment = combineSets(growingAssignment, ringAssignment);
+								structure checkS(combinedRing, elements, combinedAssignment);
+								growingAssignment = combinedAssignment;
+								growingSet = combinedRing;
+								lastZ = z;
+							}
+							//std::cout << "RM-- 15" << std::endl;
+
+
+						}
+						if (validCombination) {
+							set = growingSet;
+							assignment = growingAssignment;
+							std::cout << "accepted valid combination" << std::endl;
+						}
+						else {
+							std::cout << "threw out invalid comination" << std::endl;
+						}
+					}
+					else {
+						/*
+						Finally we can create the structure!
+						*/
+						/*
+						For each ring we must determine a center radii (for each atom type) that allows atoms in the ring to be spaced out well.
+						If there are center atoms, then we will choose whichever radii is larger, the one from the distance from the center atom or between atoms.
+						As a ring may have many types of atoms, each will be farther from the center and this will be determined for each element type individually as if they were the only one in the ring.
+						*/
+						int atomsPrior = 0;//counts the atoms we already visited, for access from element distribution
+						int atomsPriorHoles = 0;//counts atoms we alreadt visited - ones, to access hole distribution
+						int atomIterator = 0;
+						int atomIteratorHoles = 0;
+						double lastZ = 0;
+						for (int ring = 0; ring < ringCombination->size(); ring++)
+						{
+							//if (debu) std::cout << "D2 rings" << std::endl;
+							//for each subring
+							std::vector < std::vector<atom>> ringOfAtoms;
+							if (atomPrintout) std::cout << "{";
+							//determine z distance from last ring
+							double z = 0;
+							if (ring != 0)
+							{
+								//find the two closest n values
+								//use the nvalues from the centermost ring of this ring and the previous, again this is just an estimate.
+								double radii1 = averageCovalentRadiiVertical;
+								//std::cout << "radii1: " << radii1 << std::endl;
+								double lastRadii2 = averageCovalentRadiiVertical / sin(M_PI / ((*ringCombination)[ring - 1][0]));//the radius where the distance between atoms is the covalent diameter, the angle between atoms must be divided by 2 and thereofre does not have 2 M_PI
+								//std::cout << "lastradii2: " << lastRadii2 << std::endl;
+								double Radii2 = averageCovalentRadiiVertical / sin(M_PI / ((*ringCombination)[ring][0]));//the radius where the distance between atoms is the covalent diameter, the angle between atoms must be divided by 2 and thereofre does not have 2 M_PI
+								//std::cout << "Radii2: " << Radii2 << std::endl;
+								//std::cout << "Angle for radii2: " << M_PI / ((*ringCombination)[ring][0]) << ", number: " << ((*ringCombination)[ring][0]) << " for ring: " << ring << std::endl;
+								double lastR = 0;
+								double thisR = 0;
+								if (Radii2 > radii1) thisR = Radii2;
+								else thisR = radii1;
+								if (lastRadii2 > radii1) lastR = lastRadii2;
+								else lastR = radii1;
+								if ((*ringCombination)[ring][0]) thisR = 0;
+								if ((*ringCombination)[ring - 1][0]) lastR = 0;
+								//std::cout << "asin: " << (thisR - lastR) / averageCovalentRadii << " , " << thisR << " " << lastR << " " << averageCovalentRadii << std::endl;
+								double theta = asin((thisR - lastR) / averageCovalentRadiiVertical);
+								if (std::isnan(theta))
+								{
+									std::cout << "isnan theta:, " << (thisR - lastR) / averageCovalentRadiiVertical << ",thisR: " << thisR << ",lastR " << lastR << std::endl;
+								}
+								//std::cout << "theta: " << theta << std::endl;
+								z = 2 * averageCovalentRadiiVertical * cos(theta) + lastZ;
+								//std::cout << "z: " << z << std::endl;
+								if (z < 0) z = -z;
+								if (std::isnan(z)) {
+									std::cout << "nan detected:" << std::endl;
+									std::cout << "acr" << averageCovalentRadiiVertical << ",cos: " << cos(theta) << ",theta: " << theta << ", " << lastZ << std::endl;
+								}
+							}
+							double lastRingAvgRadii = 0;
+
+							for (int subring = (*ringCombination)[ring].size() - 1; subring >= 0; subring--)
+							{
+								// std::cout << " (S:" << (*ringCombination)[ring][subring] << ";";
+								//if (debu) std::cout << "D3: subring " << std::endl;
+								//calculate the radii for each element type
+								std::vector<double> elementalRadii = {};
+								for (std::vector<std::string>::iterator e = elements.begin(); e != elements.end(); e++)
+								{
+									double radii;
+									//std::cout << "last ring avg radii: " << lastRingAvgRadii << std::endl << "_______________" << std::endl;
+									/*if (subring == 0) */ radii = covalentRadii(*e, 1, true) + 2 * lastRingAvgRadii * 100;//100 for pm conversion, 2 to make it a diameter
+									//else radii = 2 * covalentRadii(*e, 1);//the atoms in the ring below may not be the same type, but this is just an estimate anyways
+									double radii2 = covalentRadii(*e, 1, true) / sin(M_PI / ((*ringCombination)[ring][subring]));//the radius where the distance between atoms is the covalent diameter, the angle between atoms must be divided by 2 and thereofre does not have 2 M_PI
+									if ((*ringCombination)[ring][subring] == 1) radii2 = 0;
+									/*if (radii2 > 1000)
+									{
+										std::cout << "problem starter: " << radii2 << ", from ring: " << (*ringCombination)[ring][subring];
+									}*/
+									if (radii > radii2) elementalRadii.push_back(radii);
+									else elementalRadii.push_back(radii2);
+									//std::cout << "elemental radii: "<< elementalRadii[elementalRadii.size() - 1] << std::endl;
+								}
+								int ratoms = 0;
+								double totalRadii = 0;
+								for (int a = 0; a < (*ringCombination)[ring][subring]; a++)
+								{
+
+									//if (debu) std::cout << "D4: atoms" << std::endl;
+
+									//if (debu) std::cout << "element distribution size/natoms:" << natoms << " atom iterator: " << atomIterator << std::endl;
+									bool thisHole = true;
+									if ((*ringCombination)[ring][subring] != 1) {
+										if (atomPrintout) std::cout << "H" << atomIteratorHoles << ',' << (*holeLocation)[atomIteratorHoles] << ':';
+										thisHole = (*holeLocation)[atomIteratorHoles];//somehow 1 is for no hole now
+										atomIteratorHoles++;
+									}
+									else if (atomPrintout) std::cout << "Hskip:";
+
+									//if (debu) std::cout << "D5" << std::endl;
+
+									if (thisHole)
+									{
+
+										ratoms++;
+										int thisElement = (*elementDistribution)[atomIterator];
+										totalRadii += elementalRadii[thisElement] / 100.0;
+
+										atomIterator++;
+										//if (debu) std::cout << "D6" << std::endl;
+										double angle = a * 2 * M_PI / (*ringCombination)[ring][subring];
+										//if (debu) std::cout << "D7:" << thisElement << " in " << elementalRadii.size() << std::endl;
+
+										/*
+										NEW Change 8/17
+										The distance between two elements next to eachother should be the priority rather than the distance between the oposite side of the polygon
+										polygon radius = 2(elementalRadius)/2sin(angle/2)
+										
+										*/
+										double polyR = elementalRadii[thisElement] / sin(angle / 2);
+										//double x = elementalRadii[thisElement] / 100.0 * cos(angle);
+										double x = polyR / 100.0 * cos(angle);
+
+										//if (debu) std::cout << "D8" << std::endl;
+										
+										//double y = elementalRadii[thisElement] / 100.0 * sin(angle);
+										
+										double y = polyR / 100.0 * sin(angle);
+										std::cout << "chord length: " << elementalRadii[thisElement] << std::endl;
+
+										//std::cout << "ANGLE,x,y: " << angle << " " << x << " " << y <<std::endl;
+										//if (debu) std::cout << "D9" << std::endl;
+										if (atomPrintout) std::cout << elements[thisElement] << " ";
+										//std::cout << "added an atom at ring: " << ring << ", subring: " << subring << std::endl;
+
+										if ((*ringCombination)[ring][subring] == 1)
+										{
+											x = 0;
+											y = 0;
+										}
+										/*if ((x > 1000 && x > 0) || (x < -1000 && x < 0) || (y > 1000 && y > 0) || (y < -1000 && y < 0))
+										{
+											std::cout << "strange numbers found." << std::endl;
+											std::cout << "z: " << z << std::endl;
+											std::cout << "elemental radii: " << elementalRadii[thisElement] << std::endl;
+											std::cout << "angle: " << angle << std::endl;
+											std::cout << "a: " << a << "ring#:  " << (*ringCombination)[ring][subring] << std::endl;
+											std::cout << "cos: " << cos(angle) << ", sin: " << sin(angle) << std::endl;
+											std::cout << "x: " << x << ",y: " << y << std::endl << std::endl;
+											std::cout << "lastringavgradii: " << lastRingAvgRadii << std::endl;
+										}*/
+
+										if (elements[thisElement].size() > 2)
+										{
+
+											std::vector<structure* > ssss = structuresFromXYZ(elements[thisElement]);
+											moveSet(ssss[0]->set, x, y, z);
+											//std::cout << "checking the sub structure elements: " << std::endl;
+											//for (int ec = 0; ec < ssss[0]->elements.size(); ec++) std::cout << ssss[0]->elements[ec] << "" << ssss[0]->set[ec].size() <<" ";
+											//std::cout << std::endl;
+											//std::cout << " here 5.1?" << ssss.size() << " " << elements[thisElement] << std::endl;
+											for (int es = 0; es < ssss[0]->set.size(); es++)
+											{
+
+												//figure out the actual this element
+												std::string celement = ssss[0]->elements[es];
+												int thisElementE = 0;
+												//std::cout << "starting element: " << celement << " for set index: " << es << std::endl;
+												for (int ee = 0; ee < elements.size(); ee++) if (celement == elements[ee]) {
+													thisElementE = ee;
+													//std::cout << "element identified in set: " << celement << " " << elements[ee] << " for index " << ee << std::endl;
+												}
+												//else {
+												//	std::cout << "celement:" << celement << ", did not match:" << elements[ee] << ", indeces:" << es << "," << ee << std::endl;
+												//}
+												for (int as = 0; as < ssss[0]->set[es].size(); as++)
+												{
+
+													ssss[0]->set[es][as].fixedGroup = thisElement;
+													//std::cout << "pushing element to set in " << elements[thisElement] << " with index " << thisElementE << std::endl;
+													set[thisElementE].push_back(ssss[0]->set[es][as]);
+													assignment[thisElementE].push_back(assign);
+
+												}
+
+											}
+											delete ssss[0];
+											assign++;
+										}
+										else {
+											//std::cout << "pushing element to set in " << elements[thisElement] << std::endl;
+											set[thisElement].push_back(atom(x, y, z));
+											assignment[thisElement].push_back(assign++);
+										}
+										//if (debu) std::cout << "D10" << std::endl;
+										//needs to be added to a set by element type
+
+									}
+
+									//if (debu) std::cout << "D4: atoms survived" << std::endl;
+								}
+								//if (atomPrintout) std::cout << ") ";
+								//if (debu) std::cout << "D3: subring SURVIVED" << std::endl;
+								//std::cout << std::endl << "LRAR now: " << lastRingAvgRadii << std::endl;
+
+								lastRingAvgRadii += totalRadii / (double)ratoms;
+								/*if (lastRingAvgRadii > 1000)
+								{
+									std::cout << "lastRingAvgRadii fail: " << lastRingAvgRadii << ", totalradii: " << totalRadii << ", ratoms: " << ratoms << std::endl;
+								}*/
+
+								//std::cout << "LRAR after: " << lastRingAvgRadii << ", totalRadii: " << totalRadii << " ratoms: " << ratoms << std::endl;
+
+							}
+							if (atomPrintout) std::cout << "} ";
+							//if (debu) std::cout << "D2: ring SURVIVED" << std::endl;
+							lastZ = z;
+						}
+					}
+					//if (debu) std::cout << "D1: inner loop SURVIVED" << std::endl;
+
+					//debugging
+					//count atomsin set and see whats wrong
+					/*int satoms = 0;
+					for (int s = 0; s < set.size(); s++) satoms += set[s].size();
+					if (satoms != natoms)
+					{
+						std::cout << "wrong atoms: " << satoms << " vs. " << natoms << std::endl;
+						//print details to see if the mistake has already been made
+						std::cout << "printout\n---------------------\nhole locations: ";
+						for (int i = 0; i < ringSpots - nOnes; i++) std::cout << (*holeLocation)[i] << " ";
+						std::cout << "std::endl";
+						std::cout << "EDS: " << elementDistributions.size() << std::endl;
+						std::cout << "element distribution:";
+						for (int i = 0; i < natoms; i++) std::cout << (*elementDistribution)[i] << " ";
+						std::cout << "std::endl";
+						std::cout << "ring combinaiton: ";
+						for (std::vector<std::vector<int>>::iterator ccit = ringCombination->begin(); ccit != ringCombination->end(); ccit++)
+						{
+							std::cout << "{";
+							for (std::vector<int>::iterator cccit = ccit->begin(); cccit != ccit->end(); cccit++) std::cout << *cccit << " ";
+							std::cout << "} ";
+						}
+						std::cout << std::endl;
+						std::cout << "--------------------\n";
+					}
+					else std::cout << "right atoms: " <<"-------" << natoms << std::endl;*/
+					/*std::cout << "adding set with atomic distribution by element: ";
+					for (std::vector<std::vector<atom>>::iterator at = set.begin(); at != set.end(); at++) std::cout << at->size() << " ";
+					std::cout << std::endl;*/
+					
+					int setsize = 0;
+					for (std::vector<std::vector<atom>>::iterator it = set.begin(); it != set.end(); it++) setsize += it->size();
+					if(setsize != 0)  notAllSets.push_back(std::pair<std::vector<std::vector<atom>>, std::vector<std::vector<int>>>(set, assignment));
+					//std::cout << "ADDED MOLECULE" << std::endl;
+					if (atomPrintout) std::cout << std::endl;
+				}
+				comboIterator++;
+			}
+		}
+		allSets.push_back(notAllSets);
+
+		/*
+		clean holeLocations and multinomial coefficient
+		*/
+		for (std::vector<bool*>::iterator hit = holeLocations.begin(); hit != holeLocations.end(); hit++) delete[](*hit);
+		for (std::vector<int*>::iterator eit = elementDistributions.begin(); eit != elementDistributions.end(); eit++) delete[](*eit);
+
+	
+	}
+
+	//make structures from all sets
+	std::vector<std::vector<structure*>> allPreCriteriaStructures = {};
+	//std::cout << "all sets size: " << allSets.size() << std::endl;
+	for (int is = 0; is < allSets.size(); is++) {
+		std::vector<structure*> preCriteriaStructures = {};
+		for (std::vector<std::pair<std::vector<std::vector<atom>>,std::vector<std::vector<int>>>>::iterator sit = allSets[is].begin(); sit != allSets[is].end(); sit++)
+		{
+			//std::cout << "elements: ";
+			//for (int eee = 0; eee < elements.size(); eee++) std::cout << elements[eee] << " ";
+			//std::cout << std::endl;
+			//std::cout << "set size: " << sit->first.size() << " ";
+			//for (int sss= 0; sss < sit->first.size(); sss++) std::cout << sit->first[sss].size() << " ";
+			//std::cout << std::endl;
+			structure* struc = new structure(sit->first, elements, sit->second);
+			/*std::cout << "adding STRUCTURE with atomic distribution by element: ";
+			for (std::vector<std::vector<atom>>::iterator at = struc->set.begin(); at != struc->set.end(); at++) std::cout << at->size() << " ";
+			std::cout << std::endl;*/
+			//struc->assignment = sit->second;
+			
+			//std::cout << std::endl;
+			//std::cout << "NEXT" << std::endl;
+			//struc->print();
+			preCriteriaStructures.push_back(struc);
+
+		}
+		allPreCriteriaStructures.push_back(preCriteriaStructures);
+	}
+
+	//check the bonding criteria only, just to remove ridiculous stuff
+	std::vector<structure*> criteriaStructures = {};
+	//std::cout << "pre criteria structures: " << preCriteriaStructures.size() << std::endl;
+	//std::cout << "all pre criteria structures size: " << allPreCriteriaStructures.size() << std::endl;
+	for (int is = 0; is < allPreCriteriaStructures.size(); is++) {
+		std::vector<structure*> theseCriteriaStructures = {};
+		//std::cout << "pre criteria structures size: " << allPreCriteriaStructures[is].size() << std::endl;
+		for (std::vector<structure*>::iterator sit = allPreCriteriaStructures[is].begin(); sit != allPreCriteriaStructures[is].end(); sit++)
+		{
+			if (true || connectednessRequirement((*sit), covalentCriteriaPercent, 1))//TODO eventually i want to implement bond requirements for each element type
+			{
+				/*std::cout << "PASSING structure with atomic distribution by element: ";
+				for (std::vector<std::vector<atom>>::iterator at = (*sit)->set.begin(); at != (*sit)->set.end(); at++) std::cout << at->size() << " ";
+				std::cout << std::endl;*/
+				theseCriteriaStructures.push_back(*sit);
+
+			}
+			else {
+				delete* sit;
+				std::cout << "failed criteria" << std::endl;
+			}
+		}
+
+		if (keepPerRingCombination == -1 || keepPerRingCombination >= theseCriteriaStructures.size())
+		{
+			//std::cout << "keep per ring combination: "<< keepPerRingCombination << " vs. These criteria structures size : " << theseCriteriaStructures.size() << std::endl;
+			for (std::vector<structure*>::iterator csit = theseCriteriaStructures.begin(); csit != theseCriteriaStructures.end(); csit++) criteriaStructures.push_back(*csit);
+		}
+		else {
+			//std::cout << "These criteria structures size: " << theseCriteriaStructures.size() << std::endl;
+			std::vector<bool> skeep = randomNchooseC(theseCriteriaStructures.size(), keepPerRingCombination);
+			for (int sit = 0; sit < theseCriteriaStructures.size(); sit++)
+			{
+				if (skeep[sit]) criteriaStructures.push_back(theseCriteriaStructures[sit]);
+				else delete theseCriteriaStructures[sit];
+			}
+		}
+		int added = 0;
+	}
+	if (dOut) std::cout << "total structures made:" << criteriaStructures.size() << std::endl;
+	return criteriaStructures;
+}
+std::vector<structure*> proceduralSeeds(std::vector<int> composition, std::vector<std::string> elements, std::vector<std::tuple<std::vector<int>, std::vector<int>,std::vector<int>>> nRnVaH, double covalentCriteriaPercent,int keepPerCombo, int keepPerRingCombination,double achange){
+	std::vector<structure*> retVal;
+	for (int i = 0; i < nRnVaH.size(); i++)
+	{
+
+		std::cout << "mrnvah combination " << i << std::endl;
+		//std::vector<structure*> tempVal = proceduralSeeds(composition, elements, std::get<0>(nRnVaH[i]), std::get<1>(nRnVaH[i]), covalentCriteriaPercent, std::get<2>(nRnVaH[i]), keepPerRingCombination);
+		std::vector<int> numRings = std::get<0>(nRnVaH[i]);
+		std::vector<int> nValues = std::get<1>(nRnVaH[i]);
+		std::vector<int> allowedHoles = std::get<2>(nRnVaH[i]);
+		std::vector<structure*> tempTempVal;
+		//std::cout << "starting loop " << std::endl;
+		for (int j = 0; j < numRings.size(); j++)
+		{
+			//std::cout << "running seed generation #" << j + j*i + 1 << " of " << numRings.size()*nRnVaH.size() << std::endl;
+			//std::cout << "j " << j << std::endl;
+			std::vector<structure*> tempVal = proceduralSeeds(composition, elements, numRings[j], nValues, covalentCriteriaPercent, allowedHoles, keepPerCombo,keepPerRingCombination,achange);
+			//std::cout << "temp val size: " << tempVal.size() << std::endl;
+			/*
+			if (keepPerCombo == -1 || keepPerCombo >= tempVal.size()) {
+				for (std::vector<structure*>::iterator it = tempVal.begin(); it != tempVal.end(); it++) retVal.push_back(*it);
+			}
+			else {
+				std::vector<bool> skeep = randomNchooseC(tempVal.size(), keepPerCombo);
+
+				/*
+				std::cout << "skeep parameters: " << tempVal.size() << " , " << keepPerCombo << std::endl;
+				for (int sk = 0; sk < skeep.size(); sk++) std::cout << skeep[sk] << " ";
+				std::cout << std::endl;
+				
+
+				for (int sit = 0; sit < tempVal.size(); sit++)
+				{
+					//std::cout << "sit " << sit << std::endl;
+					if (skeep[sit]) retVal.push_back(tempVal[sit]);
+					else delete tempVal[sit];
+				}
+			}*/
+			for (int sit = 0; sit < tempVal.size(); sit++)
+			{
+				retVal.push_back(tempVal[sit]);
+			}
+			
+		}
+		//std::cout << "finished loop " << std::endl;
+	}
+	return retVal;
+}
+
+
+std::vector<structure*> combineSurface(structure* surface, std::vector<structure*> seeds, double covalentCriteriaPercent, double achange) {
+	std::vector<structure*> newSeeds = {};
+	double sx = 0.0;
+	double sy = 0.0;
+	double sz = 0.0;
+	double szmax = -1;
+	double szmin = -1;
+	for (std::vector<structure*>::iterator it = seeds.begin(); it != seeds.end(); it++)
+	{
+		bool works = false;
+		while (!works) {
+			sz += achange;
+			std::vector<std::vector<atom>> set;
+			std::vector<std::string> elements;
+			int elIt = 0;
+			std::vector<std::vector<int>> assignment;
+			int assignIt = 0;
+			for (std::vector<std::vector<atom>>::iterator sit = (*it)->set.begin(); sit != (*it)->set.end(); sit++)
+			{
+				std::vector<atom> celement = {};
+				std::vector<int> assi = {};
+				for (std::vector<atom>::iterator ait = sit->begin(); ait != sit->end(); ait++)
+				{
+					celement.push_back(atom(ait->x, ait->y, ait->z));
+					assi.push_back((*it)->assignment[assignIt++]);
+				}
+				elements.push_back(elements[elIt++]);
+				set.push_back(celement);
+				assignment.push_back(assi);
+
+			}
+
+			elIt = 0;
+			for (std::vector<std::vector<atom>>::iterator sit = surface->set.begin(); sit != surface->set.end(); sit++)
+			{
+				//check the element
+				int eIndex = -1;
+				for (int e = 0; e < (*it)->elements.size(); e++)
+				{
+					if ((*it)->elements[e] == surface->elements[elIt])
+					{
+						eIndex = e;
+					}
+				}
+				if (eIndex == -1)
+				{
+					elements.push_back(surface->elements[elIt]);
+					eIndex = elements.size() - 1;
+					set.push_back({});
+					assignment.push_back({});
+				}
+
+				for (std::vector<atom>::iterator ait = sit->begin(); ait != sit->end(); ait++)
+				{
+					set[eIndex].push_back(atom(ait->x + sx, ait->y + sy, ait->z + sz));
+					assignment[eIndex].push_back(-1);
+				}
+				elIt++;
+			}
+
+
+			structure* cstruct = new structure(set, elements, assignment, false);
+			works = covalentCriteria(cstruct, covalentCriteriaPercent) && bondingRequirement(cstruct, covalentCriteriaPercent, 1);
+
+		}
+
+	}
+	return {};
+
+	
+}
+/*
+std::vector<int>* copyAssignment(std::vector<int>* oldAs)
+{
+	std::vector<int>* newAssignment = new std::vector<int>;
+	for (int i = 0; i < oldAs->size(); i++)
+	{
+		newAssignment->push_back((*oldAs)[i]);
+	}
+	return newAssignment;
+}
+*/

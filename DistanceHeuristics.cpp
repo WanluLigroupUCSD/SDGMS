@@ -305,6 +305,65 @@ double RID(structure& A, structure& B)
     return totalA + totalB;
 }
 
+double RIDtoAngstroms(structure& A, double angstrom)
+{
+    int natoms = 0;
+    for (int s = 0; s < A.set.size(); s++)  natoms += A.set[s].size();
+    std::vector<double> movement = {};
+    for (int s = 0; s < A.set.size(); s++) for (int a = 0; a < A.set[s].size(); a++) {
+        movement.push_back(1 - 2*(double)rand() / (double)RAND_MAX);
+        movement.push_back(1 - 2*(double)rand() / (double)RAND_MAX);
+        movement.push_back(1 - 2*(double)rand() / (double)RAND_MAX);
+    }
+
+    double magnitude = 0;
+    for (int m = 0; m < movement.size(); m++) magnitude += movement[m] * movement[m];
+    for (int m = 0; m < movement.size(); m++) movement[m] = angstrom* movement[m] / sqrt(magnitude);
+
+    //magnitude = 0;
+    //for (int m = 0; m < movement.size(); m++) magnitude += movement[m] * movement[m];
+    //std::cout << "new magnitiude: " << magnitude << std::endl;
+
+    //for (std::vector<double>::iterator it = movement.begin(); it != movement.end(); it++) normalization += *it * *it;
+    //normalization = sqrt(normalization);
+
+    structure B(A, movement);
+    return RID(A, B);
+}
+
+std::pair<double,double> RIDtoAngstroms(structure& A, double angstrom, int trials)
+{
+    //return the average and stdev RID at an angstrom value for trials
+    std::vector<double> values = {};
+    for (int t = 0; t < trials; t++) {
+        std::vector<double> movement = {};
+        for (int s = 0; s < A.set.size(); s++) for (int a = 0; a < A.set[s].size(); a++) {
+            movement.push_back(1-2*(double)rand() / (double)RAND_MAX);
+            movement.push_back(1-2*(double)rand() / (double)RAND_MAX);
+            movement.push_back(1-2*(double)rand() / (double)RAND_MAX);
+        }
+
+        double magnitude = 0;
+        for (int m = 0; m < movement.size(); m++) magnitude += movement[m] * movement[m];
+        for (int m = 0; m < movement.size(); m++) movement[m] = angstrom * movement[m] / sqrt(magnitude);
+
+        
+        structure B(A, movement);
+        values.push_back( RID(A, B));
+    }
+    
+    double average = 0;
+    for (int i = 0; i < values.size(); i++) {
+        average += values[i];
+    }
+    average = average / (double)values.size();
+    double stdev = 0;
+    for (int i = 0; i < values.size(); i++) {
+        stdev += (values[i] - average) * (values[i] - average);
+    }
+    stdev = sqrt(stdev / (double)values.size());
+    return std::pair<double, double>(average, stdev);
+}
 
 double threshold(std::function<double(structure&, structure&)> heuristic, std::vector<int> composition,std::vector<std::string> elements, double rangeX, double rangeY, double rangeZ, double similar,double moveX, double moveY, double moveZ, double percent)
 {
@@ -388,4 +447,245 @@ double threshold(std::function<double(structure&, structure&)> heuristic, std::v
     //with a distribution of these heuristics, a value will be taken
 }
 
+// Compute rotation matrix to align vector a to vector b
+std::vector<std::vector<double>> rotationMatrixToAlign(atom& a, atom& b) {
+    std::vector<double> v = a.cross(b).vec3();
+    double c = a.dot(b);
+    double k = 1 / (1 + c);
 
+    std::vector<std::vector<double>> R = {
+        {v[0] * v[0] * k + c, v[0] * v[1] * k - v[2], v[0] * v[2] * k + v[1]},
+        {v[1] * v[0] * k + v[2], v[1] * v[1] * k + c, v[1] * v[2] * k - v[0]},
+        {v[2] * v[0] * k - v[1], v[2] * v[1] * k + v[0], v[2] * v[2] * k + c}
+    };
+
+    return R;
+}
+
+// Apply rotation matrix to a vector
+atom applyRotation(std::vector<double> point, const std::vector<std::vector<double>>& R) {
+    return atom(
+        R[0][0] * point[0] + R[0][1] * point[1] + R[0][2] * point[2],
+        R[1][0] * point[0] + R[1][1] * point[1] + R[1][2] * point[2],
+        R[2][0] * point[0] + R[2][1] * point[1] + R[2][2] * point[2]);
+}
+
+
+
+
+double branchAndBound(std::vector<std::vector<double>> input)
+{
+    //std::cout << "BAB RMS 1" << std::endl;
+    if (input.size() == 1) return input[0][0];
+    //std::cout << "starting new BNB" << std::endl;
+    std::vector<std::vector<bool>> pattern = {};
+
+    //compute the top row, lower and upper bounds
+    std::vector<double> upperBounds = {};
+    std::vector<double> lowerBounds = {};
+    //std::cout << "BAB RMS 2" << std::endl;
+    for (int i = 0; i < input.size(); i++)
+    {
+        //std::cout << "BAB RMS 3" << std::endl;
+        double ub = input[0][i];
+        double lb = input[0][i];
+        for (int j = 1; j < input.size(); j++)
+        {
+            double max = 0;
+            double min = DBL_MAX;
+            for (int k = 0; k < input.size(); k++)
+            {
+                //std::cout << "BAB RMS 4" << std::endl;
+                if (k != i)
+                {
+                    if (input[j][k] > max) max = input[j][k];
+                    if (input[j][k] < min) min = input[j][k];
+                }
+                //std::cout << "BAB RMS 5" << std::endl;
+            }
+            ub += max;
+            lb += min;
+            //std::cout << "BAB RMS 6" << std::endl;
+        }
+        upperBounds.push_back(ub);
+        lowerBounds.push_back(lb);
+        //std::cout << "BAB RMS 7" << std::endl;
+        //std::cout << "pushing upper and lower bounds: " << ub << "," << lb << std::endl;
+    }
+    double lowestUpperBound = DBL_MAX;
+    //std::cout << "BAB RMS 8" << std::endl;
+    for (int i = 0; i < upperBounds.size(); i++)
+    {
+        if (upperBounds[i] < lowestUpperBound) lowestUpperBound = upperBounds[i];
+    }
+    std::vector<bool> keep = {};
+    for (int i = 0; i < lowerBounds.size(); i++)
+    {
+        if (lowerBounds[i] > lowestUpperBound)
+        {
+            keep.push_back(false);
+        }
+        else keep.push_back(true);
+    }
+
+    //std::cout << "BAB RMS 9" << std::endl;
+    std::vector<double> smallestSolutions = {};
+    for (int k = 0; k < keep.size(); k++)
+    {
+        //std::cout << "BAB RMS 10" << std::endl;
+        if (keep[k]) {
+            std::vector<std::vector<double>> smallerInput;
+
+            for (int i = 1; i < input.size(); i++)
+            {
+                //skipping the first input
+                std::vector<double> newVec = {};
+                for (int j = 0; j < input[i].size(); j++)
+                {
+                    if (k != j) newVec.push_back(input[i][j]);
+                }
+                smallerInput.push_back(newVec);
+            }
+            //std::cout << "BAB RMS SMALLER SOLUTION" << std::endl;
+            double smallerSolution = branchAndBound(smallerInput);
+            //std::cout << "smaller solution: " << smallerSolution << " with " << input[0][k] << std::endl;
+            smallestSolutions.push_back(smallerSolution + input[0][k]);
+        }
+        /*else {
+            std::cout << "Smaller BNB Excluded by bounds" << std::endl;
+        }*/
+        //std::cout << "BAB RMS 11" << std::endl;
+       
+    }
+    //std::cout << "BAB RMS 12" << std::endl;
+    double minDistance = DBL_MAX;
+    for (int k = 0; k < smallestSolutions.size(); k++)
+    {
+        if (minDistance > smallestSolutions[k]) minDistance = smallestSolutions[k];
+    }
+    //std::cout << "returning: " << minDistance << std::endl;
+    //std::cout << "BAB RMS 13________________________________________________________-" << std::endl;
+    return minDistance;
+}
+    
+
+double exactDistance(std::vector<std::vector<atom>> setA, std::vector<std::vector<atom>> setB)
+{
+    //finds the exact distance (for the current rotation) between setA and setB
+    //create a matrix computing the distance between each atom
+    int natoms = 0;
+    for (std::vector<std::vector<atom>>::iterator a = setA.begin(); a != setA.end(); a++) natoms += a->size();
+    std::vector<std::vector<double>> distanceMatrix = {};
+    for (int i = 0; i < natoms; i++) {
+        distanceMatrix.push_back({});
+        for (int j = 0; j < natoms; j++) {
+            distanceMatrix[i].push_back(0);
+        }
+    }
+
+    int it = 0;
+    for (int e = 0; e < setA.size(); e++) for (int a = 0; a < setA[e].size(); a++)
+    {
+        int jt = 0;
+        for (int eb = 0; eb < setB.size(); eb++) for (int b = 0; b < setB[eb].size(); b++)
+        {
+            distanceMatrix[it][jt] = euclideanDistance(setA[e][a], setB[eb][b]);
+            jt++;
+        }
+        it++;
+    }
+    return branchAndBound(distanceMatrix);
+
+}
+
+double threeAtomDistance(structure& a, structure& b)
+{
+    double minDistance = DBL_MAX;
+    //pick all combinations of atom a, b, c to compare
+    for (int ae = 0; ae < a.set.size(); ae++) for (int aa = 0; aa < a.set[ae].size(); aa++)
+    {
+        std::cout << "loop RMS 1" << std::endl;
+        //std::cout << "1 " << ae << " "<< aa << std::endl;
+        //for each first atom in set a
+        for (int aeb = 0; aeb < a.set.size(); aeb++) for (int ab = 0; ab < a.set[aeb].size(); ab++) if(aeb != ae || ab != aa)
+        {
+            std::cout << "loop RMS 2" << std::endl;
+            //std::cout << "2" << std::endl;
+            //for each second atom in a
+            for (int aec = 0; aec < a.set.size(); aec++) for (int ac = 0; ac < a.set[aec].size(); ac++) if ((aec != ae || ac != aa) && (aeb != aec || ac != ab))
+            {
+                std::cout << "loop RMS 3" << std::endl;
+                //std::cout << "3" << std::endl;
+
+                //For each combination of 3 atoms in set a
+                for (int ba = 0; ba < b.set[ae].size(); ba++)
+                {
+                    std::cout << "loop RMS 4" << std::endl;
+                    //std::cout << "4" << std::endl;
+                    //For each atom in b that can match atom a from a
+                    for (int bb = 0; bb < b.set[aeb].size(); bb++) if(aeb != ae || ba != bb)
+                    {
+                        std::cout << "loop RMS 5" << std::endl;
+                        //std::cout << "5" << std::endl;
+                        //For each second atom in b
+                        for (int bc = 0; bc < b.set[aec].size(); bc++) if ((aec != ae || bc != ba) && (aeb != aec || bc != bb) )
+                        {
+                            std::cout << "loop RMS 6" << std::endl;
+                            //std::cout << "6" << std::endl;
+
+                            //For each set of 3 atoms in a and b, rotate b to be in the same plane as a and compare distance
+                            // Example points in set A and B
+                            structure rotatedB = structure(b.set, b.elements);
+
+                            // Select three points from each set
+                            atom A1 = a.set[ae][aa];
+                            atom A2 = a.set[aeb][ab];
+                            atom A3 = a.set[aec][ac];
+                            atom B1 = a.set[ae][ba];
+                            atom B2 = a.set[aeb][bb];
+                            atom B3 = a.set[aec][bc];
+                            // Create normal vectors of the planes
+                            atom normalA = (A2 - A1).cross(A3 - A1).normalize();
+                            atom normalB = (B2 - B1).cross(B3 - B1).normalize();
+                            std::cout << "Normal A: " << normalA.x << " " << normalA.y << " " << normalA.z << std::endl;
+                            std::cout << "Normal B: " << normalB.x << " " << normalB.y << " " << normalB.z << std::endl;
+
+                            // Compute rotation matrix
+                            std::vector<std::vector<double>> R = rotationMatrixToAlign(normalB, normalA);
+                            std::cout << "RMS?1" << std::endl;
+                            // Rotate points in set B
+                            std::vector<std::vector<atom>> rotatedSet = {};
+                            for (std::vector<std::vector<atom>>::iterator e = b.set.begin(); e != b.set.end(); e++){
+                                std::vector<atom> rset = {};
+                                for (std::vector<atom>::iterator at = e->begin(); at != e->end(); at++) {
+                                    rset.push_back(applyRotation(at->vec3(), R));
+                                    
+                                }
+                                rotatedSet.push_back(rset);
+                            }
+                            std::cout << "RMS?2" << std::endl;
+                            // Print rotated points in set B
+                            
+                            //now find the distance between the two sets.
+                            double dist = exactDistance(a.set, rotatedSet);
+                            std::cout << "RMS?3" << std::endl;
+                            structure(rotatedSet, a.elements).print();
+                            std::cout << "current distance from exact distance: " << dist << std::endl;
+                            if (dist < minDistance)  minDistance = dist;
+                            std::cout << "RMS?4" << std::endl;
+
+                        }
+                        std::cout << "outer loop RMS 5" << std::endl;
+                    }
+                    std::cout << "outer loop RMS 4" << std::endl;
+                }
+                std::cout << "outer loop RMS 3" << std::endl;
+
+            }
+            std::cout << "outer loop RMS 2" << std::endl;
+        }
+        std::cout << "outer loop RMS 1" << std::endl;
+    }
+    std::cout << "outer loop RMS 0" << std::endl;
+    return minDistance;
+}

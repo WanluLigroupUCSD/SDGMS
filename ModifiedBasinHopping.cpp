@@ -376,7 +376,7 @@ void seedSearch(std::vector<int> composition, std::vector<std::string> elements,
 	
 }
 */
-std::vector<structure*> createSeeds( std::vector<std::string> elements, std::vector<int> composition, double cirteriaPercent, std::string xyzout, std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>> nRingsNValuesAHoles,int keepPerCombo = -1,int keepPerRingCombination = -1)
+std::vector<structure*> createSeeds( std::vector<std::string> elements, std::vector<int> composition, double cirteriaPercent, std::string xyzout, std::vector<std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>> nRingsNValuesAHoles,int keepPerCombo = -1,int keepPerRingCombination = -1,std::string support="")
 {
 	std::vector<structure*> structures = {};
 
@@ -391,8 +391,110 @@ std::vector<structure*> createSeeds( std::vector<std::string> elements, std::vec
 	int seedNo = 0;
 	std::vector<structure*> seeds = proceduralSeeds(composition, elements, nRingsNValuesAHoles, cirteriaPercent, keepPerCombo,-1,0.01);
 	//std::vector<structure*> tempSeeds = proceduralSeeds(composition, elements, numRings[i], nValues, cirteriaPercent);
+	//writeToXyz(seeds, "presupport.xyz");
+	//in the case of a supported cluster we will add the support here.
+	if (support != "")
+	{
+		//this code should be in the chemistry.cpp and .hpp files but its going to be cleaner for me to add it here for now given the time limitation. later it should be moved by a student who is funded.
+		//for each seed we must go to the seed, add it ontop of the support, and see what happens.
+		structure* supportStr = structuresFromXYZ(support)[0];
+		std::vector<structure*> newSeeds = {};
+		for (std::vector<structure*>::iterator see = seeds.begin(); see != seeds.end(); see++)
+		{
+			//add all of the atoms from the support at the lowest z coordinate of the cluster.
+			double lowestz = 0;
+			for (std::vector<std::vector<atom>>::iterator st = (*see)->set.begin(); st != (*see)->set.end(); st++)
+			{
+				for (std::vector<atom>::iterator at = st->begin(); at != st->end(); at++)
+				{
+					if (at->z < lowestz) lowestz = at->z;
+				}
+			}
+			//set all atoms in the support substructure to have this same z value
+			for (std::vector<std::vector<atom>>::iterator st = supportStr->set.begin(); st != supportStr->set.end(); st++)
+			{
+				for (std::vector<atom>::iterator at = st->begin(); at != st->end(); at++)
+				{
+					if (at->z < lowestz) lowestz = at->z;
+				}
+			}
+			//create merged structure
+			double currentz = -lowestz;
+
+			double maxz = 0;
+			double minz = DBL_MAX;
+			bool finished = false;
+			bool started = false;
+			structure* tempStructure = merge(*see, supportStr, -currentz);
+			//int natoms = 0;
+			//for (int i = 0; i < tempStructure->set.size(); i++) natoms += tempStructure->set[i].size();
+			//std::cout << "temp structure natoms: " << natoms << std::endl;
+			while (!finished)
+			{
+				if (covalentCriteria(tempStructure, cirteriaPercent) && bondingRequirement(tempStructure, cirteriaPercent, 1))
+				{
+					if (!started)
+					{
+						started = true;
+						minz = currentz;
+					}
+					else if (!finished)
+					{
+						maxz = currentz;
+					}
+				}
+				else {
+					if (started && !finished || currentz > 10)
+					{
+						finished = true;
+					}
+				}
+				currentz += 0.1;//arbitrary value
+				//std::cout << "DELETING TEMP STRUCTURE LOOP" << std::endl;
+				//tempStructure->print();
+				delete tempStructure;
+				tempStructure = merge(*see, supportStr, -currentz);
+				//natoms = 0;
+				//for (int i = 0; i < tempStructure->set.size(); i++) natoms += tempStructure->set[i].size();
+				//std::cout << "temp structure natoms: " << natoms << std::endl;
+				
+			}
+			//std::cout << "Deleting temp structure afterwards" << std::endl;
+			delete tempStructure;
+			//std::cout << "MINZ, maxz: " << minz << " " << maxz << " " << -((maxz - minz) / 2 + minz) << std::endl;
+			//std::cout << "CURRENT NEWSEEDS SIZE: " << newSeeds.size() << std::endl;
+			newSeeds.push_back(merge(*see, supportStr, -((maxz - minz) / 2 + minz)));
+			//std::cout << "PUSHED TO NEWSEEDS: ";
+			 //newSeeds[0]->print();
+
+		}
+
+		//get rid of all seeds
+		for (std::vector<structure*>::iterator see = seeds.begin(); see != seeds.end(); see++)
+		{
+			delete (*see);
+		}
+		//repopulate seeds with new seeds
+		seeds = {};
+		for (std::vector<structure*>::iterator see = newSeeds.begin(); see != newSeeds.end(); see++)
+		{
+			seeds.push_back(*see);
+		}
+
+
+		//after all is done
+		delete supportStr;//cleaning
+		std::cout << "escaped new code" << std::endl;
+	}
+	
 	std::cout << "seeds size: " << seeds.size() << " writing to " << xyzout << std::endl;
 	writeToXyz(seeds, xyzout);
+
+
+	/*
+	We need to repair the assignment of all seeds if a handmade one was provided. first check to see if they are the same length.
+	*/
+
 	return seeds;
 
 }
@@ -476,7 +578,7 @@ std::pair<std::vector<structure*>, int> optimizeSeeds(std::pair<std::vector<stru
 	return std::pair<std::vector<structure*>, int>(optimizedSeeds, seedsc.second);
 }
 
-void gauranteedEscape(std::vector<structure*> seeds,std::vector<std::string> elements,std::vector<int> composition, double time,std::string energyFile,std::string optimizationFile, std::string cancelFile, std::string calculator,double minutesElapsed, double timeOutMinutesEnergy,double timeOutMinutesOptimization,std::string xyzfilename,int previousCalculations, int maximumUphillSteps, double criteriaPercent, int numBranches,double stepSizeAngstroms,std::string xyzout, std::string outputdetails, double angstromCutoff, std::vector<int> handmadeAssignment,bool singleAtomDirections,int nAtomDirections)
+void gauranteedEscape(std::vector<structure*> seeds,std::vector<std::string> elements,std::vector<int> composition, double time,std::string energyFile,std::string optimizationFile, std::string cancelFile, std::string calculator,double minutesElapsed, double timeOutMinutesEnergy,double timeOutMinutesOptimization,std::string xyzfilename,int previousCalculations, int maximumUphillSteps, double criteriaPercent, int numBranches,double stepSizeAngstroms,std::string xyzout, std::string outputdetails, double angstromCutoff, std::vector<int> handmadeAssignment,bool singleAtomDirections,int nAtomDirections, bool bound = false, int xb = 0, int yb = 0, int zb = 0)
 {
 
 	/*
@@ -530,7 +632,25 @@ void gauranteedEscape(std::vector<structure*> seeds,std::vector<std::string> ele
 
 	1) Start by randomly ordering fixed fragments with acceptable covalent criteria, then perform optimizations and only move coordinates of fragments that are not fixed in place
 	*/
+	if (handmadeAssignment.size() == 0)
+	{
+		std::cout << "failed here?" << std::endl;
+		int b_ = 0;
+		while (seeds[b_]->assignment.size() == 0)
+		{
+
+			b_++;
+		}
+		for (int b = 0; b < seeds[b_]->assignment.size(); b++)
+		{
+			handmadeAssignment.push_back(seeds[b_]->assignment[b]);
+		}
+		std::cout << "no " << std::endl;
+	}
+
+		
 	
+
 	std::vector<structure*> localMinima = {};
 
 	
@@ -551,6 +671,7 @@ void gauranteedEscape(std::vector<structure*> seeds,std::vector<std::string> ele
 	std::stack<std::pair<structure*, std::vector<double>>> theStack = {};
 	for (int i = 0; i < seeds.size(); i++) {
 		
+		
 		//CHECK RID
 		bool passedRID = true;
 		for (std::vector<structure*>::iterator ast = allStructures.begin(); ast != allStructures.end(); ast++) if (RIDthreshold >= RID(*seeds[i], *(*ast))) passedRID = false;
@@ -566,11 +687,14 @@ void gauranteedEscape(std::vector<structure*> seeds,std::vector<std::string> ele
 					
 					int dimensions = 0;
 					std::vector<int>* assignmentPtr = nullptr;
-					if (seeds[i]->assignment.size() == 0) assignmentPtr = &handmadeAssignment;
+					if (seeds[i]->assignment.size() == 0) {
+						assignmentPtr = &handmadeAssignment;
+						
+					}
 					else assignmentPtr = &seeds[i]->assignment;
-					for (int z = 0; z < assignmentPtr->size(); z++) if (assignmentPtr->size() > dimensions) dimensions = assignmentPtr->size();
+					for (int z = 0; z < assignmentPtr->size(); z++) if ((*assignmentPtr)[z] > dimensions) dimensions = (*assignmentPtr)[z];
 					dimensions++;//the first assignment is 0
-
+					std::cout << "DIMENSIONS: " << dimensions << std::endl;
 					if (nAtomDirections < 1) {
 						
 						for (int id = 0; id < dimensions; id++)
@@ -604,8 +728,12 @@ void gauranteedEscape(std::vector<structure*> seeds,std::vector<std::string> ele
 					double normalizationConstant = sqrt(t2);
 					for (int im = 0; im < movement.size(); im++) movement[im] = stepSizeAngstroms * movement[im] / normalizationConstant;
 
-
+					//std::cout << "MOVEMENT created: ";
+					//for (std::vector<double>::iterator it = movement.begin(); it != movement.end(); it++) std::cout << *it << " ";
 					theStack.push(std::pair<structure*, std::vector<double>>(seeds[i], movement));
+					//std::cout << "Added seed and vector to the stack with assignment: ";
+					//for (std::vector<int>::iterator it = seeds[i]->assignment.begin(); it != seeds[i]->assignment.end(); it++) std::cout << *it << " ";
+					//std::cout << " and movement size: " << movement.size() << std::endl;
 					
 				}
 				
@@ -636,8 +764,8 @@ void gauranteedEscape(std::vector<structure*> seeds,std::vector<std::string> ele
 							movementNegative.push_back(-stepSizeAngstroms);
 						}
 					}
-					structure* sP = new structure(*seeds[i], movementPositive, *assignmentPtr);
-					structure* sN = new structure(*seeds[i], movementNegative, *assignmentPtr);
+					structure* sP = new structure(*seeds[i], movementPositive, *assignmentPtr,bound,xb,yb,zb);
+					structure* sN = new structure(*seeds[i], movementNegative, *assignmentPtr,bound, xb, yb, zb);
 					bool passedRIDp = true;
 					bool passedRIDn = true;
 					for (int d = 0; d < directions.size(); d++)
@@ -705,9 +833,13 @@ void gauranteedEscape(std::vector<structure*> seeds,std::vector<std::string> ele
 		std::pair<structure*, std::vector<double>> csd = theStack.top();
 		theStack.pop();
 		structure* cStruct = csd.first;
+		
 		std::vector<double> movement = csd.second;
+		//std::cout << "Popped seed and vector to the stack with assignment: ";
+		//for (std::vector<int>::iterator it = cStruct->assignment.begin(); it != cStruct->assignment.end(); it++) std::cout << *it << " ";
+		//std::cout << " and movement size: " << movement.size() << std::endl;
 		if (pforp) {
-			std::cout << " top of stack structure with " << cStruct->energy << std::endl;
+			
 			cStruct->print();
 		}
 		//localMinima.push_back(cStruct);//it is already optimized
@@ -723,32 +855,60 @@ void gauranteedEscape(std::vector<structure*> seeds,std::vector<std::string> ele
 		while (newEnergy >= lastEnergy && !stopAlgo && maximumUphillSteps > uphillSteps)
 		{
 			std::cout << "GE: step:" << uphillSteps << std::endl;
+			
 			lastEnergy = tempS->energy;
 			std::vector<int>* assignmentPtr = nullptr;
-			if (cStruct->assignment.size() == 0) assignmentPtr = &handmadeAssignment;
+			if (cStruct->assignment.size() == 0)
+			{
+				if (handmadeAssignment.size() == 0)
+				{
+
+				}
+				else
+				{
+					assignmentPtr = &handmadeAssignment;
+				}
+				
+
+
+			}
 			else assignmentPtr = &cStruct->assignment;
+			
 			//the following line is a bandaid
 			//assignmentPtr = &handmadeAssignment;
+			
 			if (pforp)
 			{
-				std::cout << "assignment pointer: " << std::endl;
+				
 				for (int iii = 0; iii < assignmentPtr->size(); iii++)
 				{
 					std::cout << (*assignmentPtr)[iii] << " ";
 				}
 				std::cout << std::endl;
 			}
-			tempS = new structure(*tempS, movement, *assignmentPtr);
+			
+			std::cout << assignmentPtr << std::endl;
+			
+			std::cout << assignmentPtr->size() << std::endl;
+			for (int iii = 0; iii < assignmentPtr->size(); iii++)
+			{
+				std::cout << (*assignmentPtr)[iii] << " ";
+			}
+			std::cout << std::endl;
+			tempS = new structure(*tempS, movement, *assignmentPtr,bound,xb,yb,zb);
+			
 			if (pforp) {
 				std::cout << "moved structure " << std::endl;
 				tempS->print();
 			}
+			
 			//std::cout << " new structure temps:" << std::endl;
 			//tempS->print();
 			//std::cout << " vs. old structure cstruct: " << std::endl;
 			//cStruct->print();
 			//std::cout << "Did cstruct even pass the criteria tests?, covalent: " << covalentCriteria(cStruct, criteriaPercent) << " , bonding: " << bondingRequirement(cStruct, criteriaPercent, 1) << std::endl;
 			tempStructures.push_back(tempS);
+			//tempS->print();
 			if (covalentCriteria(tempS, criteriaPercent) && bondingRequirement(tempS, criteriaPercent, 1))
 			{
 				//make sure that this direction is valid before killing time on it
@@ -780,6 +940,7 @@ void gauranteedEscape(std::vector<structure*> seeds,std::vector<std::string> ele
 			totalStepsGO++;
 			if (cStruct != nullptr) {
 				cStruct->time = minutes;
+				
 				//localMinima.push_back(cStruct);
 				std::cout << "new local minima optimized with energy: " << cStruct->energy << " , calculation: " << previousCalculations << std::endl;
 				if (pforp)
@@ -801,6 +962,58 @@ void gauranteedEscape(std::vector<structure*> seeds,std::vector<std::string> ele
 					if (!singleAtomDirections)
 					{
 						for (int j = 0; j < numBranches; j++) {
+
+							std::vector<double> movement = {};
+
+							int dimensions = 0;
+							std::vector<int>* assignmentPtr = nullptr;
+							if (cStruct->assignment.size() == 0) assignmentPtr = &handmadeAssignment;
+							else assignmentPtr = &cStruct->assignment;
+							for (int z = 0; z < assignmentPtr->size(); z++) if ((*assignmentPtr)[z] > dimensions) dimensions = (*assignmentPtr)[z];
+							dimensions++;//the first assignment is 0
+							std::cout << "DIMENSIONS: " << dimensions << std::endl;
+							if (nAtomDirections < 1) {
+
+								for (int id = 0; id < dimensions; id++)
+								{
+									movement.push_back(((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1)));
+									movement.push_back(((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1)));
+									movement.push_back(((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1)));
+								}
+							}
+							else {
+								std::vector<bool> rncc = randomNchooseC(dimensions, nAtomDirections);
+								for (int id = 0; id < dimensions; id++)
+								{
+									if (rncc[id]) {
+										movement.push_back(((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1)));
+										movement.push_back(((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1)));
+										movement.push_back(((2.0 * (rand() % RAND_MAX) / RAND_MAX - 1)));
+									}
+									else {
+										movement.push_back((0));
+										movement.push_back((0));
+										movement.push_back((0));
+									}
+								}
+
+							}
+
+
+							double t2 = 0;
+							for (int im = 0; im < movement.size(); im++) t2 += movement[im] * movement[im];
+							double normalizationConstant = sqrt(t2);
+							for (int im = 0; im < movement.size(); im++) movement[im] = stepSizeAngstroms * movement[im] / normalizationConstant;
+
+							//std::cout << "MOVEMENT created: ";
+							//for (std::vector<double>::iterator it = movement.begin(); it != movement.end(); it++) std::cout << *it << " ";
+							theStack.push(std::pair<structure*, std::vector<double>>(cStruct, movement));
+							//std::cout << "Added seed and vector to the stack with assignment: ";
+							//for (std::vector<int>::iterator it = cStruct->assignment.begin(); it != cStruct->assignment.end(); it++) std::cout << *it << " ";
+							//std::cout << " and movement size: " << movement.size() << std::endl;
+
+						}
+						/*for (int j = 0; j < numBranches; j++) {
 							std::vector<double> movement = {};
 							int dimensions = 0;
 							std::vector<int>* assignmentPtr = nullptr;
@@ -824,7 +1037,7 @@ void gauranteedEscape(std::vector<structure*> seeds,std::vector<std::string> ele
 
 							theStack.push(std::pair<structure*, std::vector<double>>(cStruct, movement));
 
-						}
+						}*/
 
 					}
 					else {
@@ -854,8 +1067,8 @@ void gauranteedEscape(std::vector<structure*> seeds,std::vector<std::string> ele
 									movementNegative.push_back(-stepSizeAngstroms);
 								}
 							}
-							structure* sP = new structure(*cStruct, movementPositive, *assignmentPtr);
-							structure* sN = new structure(*cStruct, movementNegative, *assignmentPtr);
+							structure* sP = new structure(*cStruct, movementPositive, *assignmentPtr,bound, xb, yb, zb);
+							structure* sN = new structure(*cStruct, movementNegative, *assignmentPtr, bound, xb, yb, zb);
 							bool passedRIDp = true;
 							bool passedRIDn = true;
 							for (int d = 0; d < directions.size(); d++)
@@ -1212,6 +1425,16 @@ int main(int argv, char* argc[])
 	
 	//
 	srand(time(0));
+
+
+	//code box to test out supported structure seeds
+	//structure* check = structuresFromXYZ("supported.xyz")[0];
+	//check->print();
+	//std::cout << "criteria: "<< covalentCriteria(check, 50) << std::endl;
+	//createSeeds({ "Ru" }, { 2 }, 20, "supported.xyz", { std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>({1}, {2}, {0}) }, 1, 1, "graphene.xyz");
+
+
+	//return 0;
 	/*double stepSizeAngstroms = 0.8;
 	std::vector<structure*> seedsssss = createSeeds({ "B" }, { 6 }, 30, "dm.xyz", { std::tuple<std::vector<int>, std::vector<int>, std::vector<int>>({ 2 }, { 5 }, { 0 }) }, true, -1);
 	
@@ -1306,6 +1529,7 @@ int main(int argv, char* argc[])
 	std::vector<structure*> seeds1 = createSeeds({ "Ag","B" }, { 1,9 },10, "agb9seeds.xyz", nrnva, 20, -1);
 	return 0;
 	*/
+
 	std::vector<std::string> elements = {};
 	std::vector<int> composition = {};
 	std::string energyFile = "";
@@ -1319,6 +1543,11 @@ int main(int argv, char* argc[])
 	std::string calculator = "P";
 	int noptimizations = -1;
 	int nAtomDirections = 0;
+
+	bool bounds = false;
+	int xb = 0;
+	int yb = 0;
+	int zb = 0;
 
 	double timeOutMinutesEnergy;
 	double timeOutMinutesOptimization;
@@ -1335,10 +1564,11 @@ int main(int argv, char* argc[])
 	std::vector<int> assignment;
 
 	std::ifstream inputFile(argc[1]);
+	
+	//std::ifstream inputFile("inp.txt");
 
 	bool printInp = true;
 	bool singleAtomDirections = false;
-	//std::ifstream inputFile("inp.txt");
 	bool analysis = false;
 	bool bhflag = false;
 	double kbteff = 1;
@@ -1347,7 +1577,6 @@ int main(int argv, char* argc[])
 	std::string surface = "";//file for the structure of the fixed surface
 	//surface is assumed to be relative to the clusters center at 0,0,0
 	
-
 	std::string read;
 	while (std::getline(inputFile, read))
 	{
@@ -1529,6 +1758,7 @@ int main(int argv, char* argc[])
 		}
 		else if (read.substr(0, std::string("pythonFile").size()) == "pythonFile")
 		{
+			cancelFile = "";//erase the default
 		bool swap = false;
 		for (int c = 0; c < read.size(); c++)
 		{
@@ -1752,6 +1982,31 @@ int main(int argv, char* argc[])
 		analysis = true;
 		if (printInp) std::cout << "analysis on previous calculations specified" << std::endl;
 		}
+		else if (read.substr(0, std::string("periodic").size()) == "periodic")
+		{
+			bounds = true;
+			if (read[read.size() - 1] == '\r') read.erase(read.size() - 1);//remove unwanted \r
+
+			std::string numx = "";
+			std::string numy = "";
+			std::string numz = "";
+			int swap = 0;
+			for (int c = 0; c < read.size(); c++)
+			{
+				if (read[c] == ' ') swap++;
+				else if (swap == 1) numx += read[c];
+				else if (swap == 2) numy += read[c];
+				else if (swap == 3) numz += read[c];
+			}
+			xb = std::stoi(numx);
+			yb = std::stoi(numy);
+			zb = std::stoi(numz);
+			if (printInp) {
+				std::cout << "periodic system boundaries:" << xb << " " << yb << " " << zb;
+				std::cout << std::endl;
+			}
+
+		}
 		else {
 		std::cout << "unknown line:" <<  read << std::endl;
 		}
@@ -1773,7 +2028,7 @@ int main(int argv, char* argc[])
 		{
 			std::cout << "element: " << elements[i] << " " << composition[i] << std::endl;
 		}
-		if (optimizedSeedsFile == "" && energySeedsFile == "")seeds = createSeeds(elements, composition, criteriaPercent, xyzout, nRingsNValuesAHoles, keep, -1);
+		if (optimizedSeedsFile == "" && energySeedsFile == "")seeds = createSeeds(elements, composition, criteriaPercent, xyzout, nRingsNValuesAHoles, keep, -1,surface);
 
 		std::cout << "seeds made: " << seeds.size() << std::endl;
 		auto stop = std::chrono::high_resolution_clock::now();
@@ -1810,8 +2065,30 @@ int main(int argv, char* argc[])
 			int a = 0;
 			for (int i = 0; i < composition.size(); i++) for (int j = 0; j < composition[i]; j++) assignment.push_back(a++);
 		}
-
-		if(!bhflag) gauranteedEscape(optimizedSeeds.first, elements, composition, time, energyFile, optimizationFile,cancelFile, calculator, minutesElpased, timeOutMinutesEnergy, timeOutMinutesOptimization, xyzinp, optimizedSeeds.second, maxUphillSteps, criteriaPercent, nBranches, stepSize, xyzout, "output.txt", angstromLimit, assignment, singleAtomDirections,nAtomDirections);
+		//we should make a fake assignment anyways when it is not specified at all
+		if ( assignment.size() == 0)
+		{
+			int a = 0;
+			for (int i = 0; i < composition.size(); i++) for (int j = 0; j < composition[i]; j++) assignment.push_back(a++);
+		}
+		//if the handmade assignment is specified we need to implement it anyways rather than overriding it.
+		if (assignment.size() != 0)
+		{
+			if (optimizedSeeds.first[0]->assignment.size() != assignment.size())
+			{
+				//we need to fix this, the support comes first.
+				std::vector<int> newAssignment = {};
+				for (int w = 0; w <  optimizedSeeds.first[0]->assignment.size() - assignment.size(); w++)
+				{
+					newAssignment.push_back(optimizedSeeds.first[0]->assignment[w]);//these should all be -1
+				}
+				for (std::vector<int>::iterator wt = assignment.begin(); wt != assignment.end(); wt++) newAssignment.push_back(*wt);
+				assignment = newAssignment;
+			}
+			//force the handmade assignment upon all.
+			for (std::vector<structure*>::iterator st = optimizedSeeds.first.begin(); st != optimizedSeeds.first.end(); st++) (*st)->assignment = assignment;
+		}
+		if(!bhflag) gauranteedEscape(optimizedSeeds.first, elements, composition, time, energyFile, optimizationFile,cancelFile, calculator, minutesElpased, timeOutMinutesEnergy, timeOutMinutesOptimization, xyzinp, optimizedSeeds.second, maxUphillSteps, criteriaPercent, nBranches, stepSize, xyzout, "output.txt", angstromLimit, assignment, singleAtomDirections,nAtomDirections,bounds,xb,yb,zb);
 		else BasinHopping(optimizedSeeds.first, elements, composition, time, energyFile, optimizationFile,cancelFile, calculator, minutesElpased, timeOutMinutesEnergy, timeOutMinutesOptimization, xyzinp, optimizedSeeds.second, maxUphillSteps, criteriaPercent, stepSize, xyzout, angstromLimit, assignment, singleAtomDirections);
 		/*
 		Delete optimized seeds, the software is done
