@@ -694,7 +694,7 @@ void gauranteedEscape(std::vector<structure*> seeds,std::vector<std::string> ele
 					else assignmentPtr = &seeds[i]->assignment;
 					for (int z = 0; z < assignmentPtr->size(); z++) if ((*assignmentPtr)[z] > dimensions) dimensions = (*assignmentPtr)[z];
 					dimensions++;//the first assignment is 0
-					std::cout << "DIMENSIONS: " << dimensions << std::endl;
+					//std::cout << "DIMENSIONS: " << dimensions << std::endl;
 					if (nAtomDirections < 1) {
 						
 						for (int id = 0; id < dimensions; id++)
@@ -2054,11 +2054,9 @@ int main(int argv, char* argc[])
 		for (std::vector<structure*>::iterator st = sortedSeeds.first.begin(); st != sortedSeeds.first.end(); st++) delete* st;
 
 		std::cout << optimizedSeeds.first.size() << " seeds optimized" << std::endl;
-
 		stop = std::chrono::high_resolution_clock::now();
 		duration = std::chrono::duration_cast<std::chrono::minutes>(stop - start);
 		minutesElpased = (double)duration.count();
-
 		//if assignment is not specififed but energy or optimized seeds are provided the software will crash, therefore a fake assignment should be made where each atom gets its own assignment.
 		if ((energySeedsFile != "" || optimizedSeedsFile != "") && assignment.size() == 0)
 		{
@@ -2074,16 +2072,56 @@ int main(int argv, char* argc[])
 		//if the handmade assignment is specified we need to implement it anyways rather than overriding it.
 		if (assignment.size() != 0)
 		{
-			if (optimizedSeeds.first[0]->assignment.size() != assignment.size())
+			std::cout << "Assignment size: " << assignment.size() << std::endl;
+			if (optimizedSeeds.first[0]->assignment.size() > assignment.size())
 			{
+				/*
+				If the optimized seed assignment is larger then this means the support is not accounted for.
+				*/
+				//std::cout << "seed assignment size: " << optimizedSeeds.first[0]->assignment.size() << ", vs.  " << assignment.size() << std::endl;
 				//we need to fix this, the support comes first.
 				std::vector<int> newAssignment = {};
 				for (int w = 0; w <  optimizedSeeds.first[0]->assignment.size() - assignment.size(); w++)
 				{
 					newAssignment.push_back(optimizedSeeds.first[0]->assignment[w]);//these should all be -1
 				}
+				
+
 				for (std::vector<int>::iterator wt = assignment.begin(); wt != assignment.end(); wt++) newAssignment.push_back(*wt);
 				assignment = newAssignment;
+
+				int natoms = 0;
+				for (std::vector<std::vector<atom>>::iterator it = optimizedSeeds.first[0]->set.begin(); it != optimizedSeeds.first[0]->set.end(); it++) natoms += it->size();
+				if (assignment.size() != natoms)
+				{
+					std::cout << "WARNING, the provided assignment, length " << assignment.size() << "does not have the same number of indeces as the number of atoms in the cluster, length ," << natoms << " . replacing with a default assignment." << std::endl;
+					newAssignment = {};
+					for (int w = 0; w < optimizedSeeds.first[0]->assignment.size() - assignment.size(); w++)
+					{
+						newAssignment.push_back(optimizedSeeds.first[0]->assignment[w]);//these should all be -1
+					}
+					for (int w = optimizedSeeds.first[0]->assignment.size() - assignment.size(); w < natoms; w++)
+					{
+						newAssignment.push_back(1-(optimizedSeeds.first[0]->assignment.size() - assignment.size()));//these should all be -1
+					}
+					assignment = newAssignment;
+
+				}
+			}
+			else if (optimizedSeeds.first[0]->assignment.size() < assignment.size()) {
+				//this should not happen, but it can.
+				int natoms = 0;
+				for (std::vector<std::vector<atom>>::iterator it = optimizedSeeds.first[0]->set.begin(); it != optimizedSeeds.first[0]->set.end(); it++) natoms += it->size();
+				if (assignment.size() != natoms)
+				{
+					std::cout << "WARNING, the provided assignment, length " << assignment.size() <<  "does not have the same number of indeces as the number of atoms, length ," << natoms << " . replacing with a default assignment." << std::endl;
+					std::vector<int> newAssignment = {};
+					for (int w = 0; w < natoms; w++)
+					{
+						newAssignment.push_back(1 );
+					}
+					assignment = newAssignment;
+				}
 			}
 			//force the handmade assignment upon all.
 			for (std::vector<structure*>::iterator st = optimizedSeeds.first.begin(); st != optimizedSeeds.first.end(); st++) (*st)->assignment = assignment;
